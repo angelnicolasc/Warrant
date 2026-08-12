@@ -136,6 +136,36 @@ impl Expr {
         out
     }
 
+    /// Whether evaluating this expression can run a command.
+    pub fn runs_commands(&self) -> bool {
+        let mut found = false;
+        self.walk(&mut |expr| {
+            if matches!(
+                expr,
+                Expr::Compare { left: Value::ExitCode(_), .. } | Expr::Truth(Value::ExitCode(_))
+            ) {
+                found = true;
+            }
+        });
+        found
+    }
+
+    /// Split a top-level conjunction into its parts.
+    ///
+    /// Only `AND` is split. A disjunct can be false without the whole being
+    /// false, so `OR` is left intact — taking it apart would turn a sound
+    /// check into a wrong one.
+    pub fn conjuncts(&self) -> Vec<&Expr> {
+        match self {
+            Expr::And(left, right) => {
+                let mut parts = left.conjuncts();
+                parts.extend(right.conjuncts());
+                parts
+            }
+            other => vec![other],
+        }
+    }
+
     fn walk(&self, visit: &mut impl FnMut(&Expr)) {
         visit(self);
         match self {

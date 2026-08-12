@@ -7,9 +7,10 @@
 
 use warrant_core::PredicateHash;
 
+use crate::ast::Expr;
 use crate::compile::{compile, read_constants, read_source};
 use crate::error::Result;
-use crate::parse::parse;
+use crate::parse::{Parsed, parse};
 
 /// A proof compiled to WebAssembly and hashed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,6 +80,46 @@ impl Predicate {
         };
         parsed.expr.commands(&parsed.constants)
     }
+
+    /// The part of this proof that can be checked without running anything.
+    ///
+    /// Returns the conjunction of the top-level conjuncts that contain no
+    /// `exit()`, or `None` when every conjunct needs a command.
+    ///
+    /// **What this is sound for.** If the result evaluates false, the full
+    /// proof is false *at this instant*, because a false conjunct makes a
+    /// conjunction false. That is enough to prune a best-of-N branch cheaply.
+    ///
+    /// **What it is not.** It is not a proof of unsatisfiability: an agent can
+    /// still put back a file it deleted. Pruning on it is a decision about
+    /// where to spend compute, and the map is always recomputed from the real
+    /// proof before anything is reported.
+    pub fn structural_only(&self) -> Result<Option<Predicate>> {
+        let parsed = parse(&self.source)?;
+        let kept: Vec<Expr> = parsed
+            .expr
+            .conjuncts()
+            .into_iter()
+            .filter(|conjunct| !conjunct.runs_commands())
+            .cloned()
+            .collect();
+
+        let mut parts = kept.into_iter();
+        let Some(first) = parts.next() else { return Ok(None) };
+        let expr = parts.fold(first, |acc, next| Expr::And(Box::new(acc), Box::new(next)));
+
+        // The constant table is carried over whole. Unused entries cost a few
+        // bytes and keep every index in the sub-expression valid.
+        let source = expr.render(&parsed.constants);
+        let reduced = Parsed { expr, constants: parsed.constants };
+        let wasm = compile(&reduced, &source)?;
+        Ok(Some(Predicate {
+            hash: PredicateHash::derive(&[&wasm]),
+            wasm,
+            constants: reduced.constants,
+            source,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -123,6 +164,42 @@ mod tests {
         assert_eq!(recovered.hash(), original.hash());
         assert_eq!(recovered.source(), original.source());
         assert_eq!(recovered.constants(), original.constants());
+    }
+
+    #[test]
+    fn the_structural_part_of_a_proof_drops_the_clauses_that_run_commands() {
+        let proof = Predicate::compile(
+            r#"exit(pytest) == 0 AND diff_touches("src/**") AND NOT diff_touches("tests/**")"#,
+        )
+        .unwrap();
+
+        let structural = proof.structural_only().unwrap().unwrap();
+        assert!(structural.commands().is_empty(), "nothing may run: {:?}", structural.commands());
+        assert!(structural.source().contains("src/**"));
+        assert!(structural.source().contains("tests/**"));
+        assert!(!structural.source().contains("pytest"));
+    }
+
+    #[test]
+    fn a_proof_that_is_only_a_command_has_no_structural_part() {
+        let proof = Predicate::compile("exit(cargo test) == 0").unwrap();
+        assert!(proof.structural_only().unwrap().is_none());
+    }
+
+    /// Only `AND` is split. Taking a disjunction apart would turn a sound
+    /// check into a wrong one, because a false disjunct proves nothing.
+    #[test]
+    fn a_disjunction_is_left_whole_and_therefore_dropped() {
+        let proof =
+            Predicate::compile(r#"exit(cargo test) == 0 OR diff_touches("src/**")"#).unwrap();
+        assert!(proof.structural_only().unwrap().is_none());
+    }
+
+    #[test]
+    fn the_structural_part_is_a_different_proof_with_its_own_address() {
+        let proof = Predicate::compile(r#"exit(pytest) == 0 AND diff_touches("src/**")"#).unwrap();
+        let structural = proof.structural_only().unwrap().unwrap();
+        assert_ne!(structural.hash(), proof.hash());
     }
 
     #[test]

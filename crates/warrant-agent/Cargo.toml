@@ -1,0 +1,31 @@
+[package]
+name = "warrant-agent"
+description = "The loop: providers, the six built-in tools, budgets, stuck detection and best-of-N adjudication."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+warrant-attest.workspace = true
+warrant-cell.workspace = true
+warrant-core.workspace = true
+warrant-diff.workspace = true
+warrant-ledger.workspace = true
+warrant-necessity.workspace = true
+
+globset.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tiny_http.workspace = true
+warrant-attest.workspace = true
+warrant-cell.workspace = true
+warrant-diff.workspace = true
+warrant-ledger.workspace = true

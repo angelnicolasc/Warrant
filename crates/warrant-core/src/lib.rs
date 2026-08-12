@@ -23,6 +23,7 @@
 pub mod claim;
 pub mod clock;
 pub mod context;
+pub mod handle;
 pub mod hash;
 pub mod ids;
 pub mod ratio;
@@ -31,6 +32,7 @@ pub mod verdict;
 pub use claim::{Budget, Claim, ProofTier};
 pub use clock::{format_rfc3339, now_ms};
 pub use context::{ContextRenderable, ModelContext};
+pub use handle::{ArtifactKind, Handle};
 pub use hash::{Hash, HashParseError, Hasher};
 pub use ids::{CellId, ClaimId, HunkId, PredicateHash, ReceiptRef, RunId};
 pub use ratio::Ratio;
