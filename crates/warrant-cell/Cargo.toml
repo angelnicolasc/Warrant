@@ -1,0 +1,22 @@
+[package]
+name = "warrant-cell"
+description = "L2: isolation boundaries, observed deltas, and the supervisor that is the sole source of evidence."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+warrant-core.workspace = true
+warrant-diff.workspace = true
+warrant-ledger.workspace = true
+
+serde.workspace = true
+thiserror.workspace = true
+which.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
