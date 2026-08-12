@@ -1,0 +1,25 @@
+[package]
+name = "warrant-attest"
+description = "L4: the sealed attestor. Proofs compile to WebAssembly, run opaquely, and return one bit."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+warrant-core.workspace = true
+warrant-cell.workspace = true
+warrant-diff.workspace = true
+
+globset.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+wasm-encoder.workspace = true
+wasmparser.workspace = true
+wasmtime.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
