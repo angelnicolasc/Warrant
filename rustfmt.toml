@@ -1,0 +1,8 @@
+edition = "2024"
+max_width = 100
+
+# Keep short struct literals and calls on one line when they fit inside the
+# line limit. The default heuristics break `Ratio { numerator, denominator }`
+# across four lines, which makes dense value types harder to read rather than
+# easier.
+use_small_heuristics = "Max"

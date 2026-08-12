@@ -1,0 +1,15 @@
+# Line endings are LF in the repository and LF in every working tree.
+#
+# This is not cosmetic here. Warrant's hunk engine treats a line's terminator
+# as part of the line, so that a reconstruction is byte-exact — and a checkout
+# that rewrote CRLF into LF would make the tool disagree with the repository
+# about what the agent actually wrote.
+* text=auto eol=lf
+
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.wasm binary

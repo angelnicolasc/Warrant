@@ -1,0 +1,55 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "Apache-2.0"
+repository = "https://github.com/angelnicolasc/warrant"
+authors = ["angelnicolasc"]
+
+[workspace.dependencies]
+warrant-core = { path = "crates/warrant-core", version = "0.1.0" }
+warrant-ledger = { path = "crates/warrant-ledger", version = "0.1.0" }
+warrant-diff = { path = "crates/warrant-diff", version = "0.1.0" }
+warrant-cell = { path = "crates/warrant-cell", version = "0.1.0" }
+warrant-attest = { path = "crates/warrant-attest", version = "0.1.0" }
+warrant-necessity = { path = "crates/warrant-necessity", version = "0.1.0" }
+warrant-receipt = { path = "crates/warrant-receipt", version = "0.1.0" }
+
+anyhow = "1.0"
+base64 = "0.23"
+blake3 = "1.8"
+clap = { version = "4.6", features = ["derive", "wrap_help"] }
+ed25519-dalek = "3.0"
+globset = "0.4"
+hex = "0.4"
+ignore = "0.4"
+proptest = "1.11"
+rand = "0.10"
+redb = "4.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+similar = "3.1"
+tempfile = "3.27"
+thiserror = "2.0"
+wasm-encoder = "0.256"
+wasmparser = "0.256"
+wasmtime = { version = "47.0", default-features = false, features = ["cranelift", "runtime", "std"] }
+which = "8.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+# Deliberately unwinding, not `panic = "abort"`. The supervisor has to survive
+# a panicking probe and report it as an unstable predicate; aborting the
+# process would lose the ledger write that records why.
+
+# Probe throughput is the product. Debug builds run the necessity search too,
+# so dependencies are optimised even in dev profiles.
+[profile.dev.package."*"]
+opt-level = 2

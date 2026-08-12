@@ -1,0 +1,47 @@
+# ─── Internal documentation ───────────────────────────
+# The blueprint is the design record for the team. It carries positioning,
+# launch strategy, open risks and unpublished reasoning. Public-facing
+# architecture lives in README.md.
+WARRANT-BLUEPRINT.md
+harness-2026.md
+/docs/internal/
+*.internal.md
+
+# ─── Rust ───────────────────────────────────────────────────────────────
+/target/
+**/*.rs.bk
+*.pdb
+
+# ─── Node / SDK ─────────────────────────────────────────────────────────
+node_modules/
+dist/
+*.tsbuildinfo
+.npm/
+*.node
+
+# ─── Python SDK ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# ─── Secrets & local config ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# ─── Warrant runtime artifacts ──────────────────────────────────────────
+# Ledgers and cell snapshots are per-machine and can be large.
+.warrant/
+*.ledger
+*.snapshot
+
+# ─── Editors & OS ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
