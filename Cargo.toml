@@ -5,7 +5,11 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.90"
+# Measured, not assumed. 1.90 was tried and refused: `cranelift-assembler-x64`
+# and its siblings, which arrive through wasmtime, declare 1.94.0 themselves.
+# 1.94.0 builds the workspace clean. CI pins that exact version, because this
+# floor moves when a dependency moves and nothing in this workspace changes.
+rust-version = "1.94"
 license = "Apache-2.0"
 repository = "https://github.com/angelnicolasc/warrant"
 authors = ["angelnicolasc"]

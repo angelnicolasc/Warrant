@@ -61,7 +61,7 @@ It is not a verifier. There is no silver bullet for coding-agent verification ([
 
 ## Install
 
-No binary release yet. Build from source with Rust 1.90 or newer:
+No binary release yet. Build from source with Rust 1.94 or newer:
 
 ```bash
 git clone https://github.com/angelnicolasc/warrant && cd warrant

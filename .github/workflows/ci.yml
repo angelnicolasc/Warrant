@@ -51,6 +51,19 @@ jobs:
       - name: Tests
         run: cargo test --workspace
 
+  msrv:
+    name: minimum supported Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned to the version `rust-version` declares. The floor comes from
+      # cranelift, which arrives through wasmtime, so it moves without this
+      # workspace changing at all — which is exactly why it is checked rather
+      # than stated.
+      - uses: dtolnay/rust-toolchain@1.94.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+
   release-build:
     name: release build
     runs-on: ubuntu-latest
