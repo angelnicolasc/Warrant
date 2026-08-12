@@ -1,0 +1,27 @@
+[package]
+name = "warrant-receipt"
+description = "L7: the attestation rendered for someone who was not there. in-toto statements in DSSE envelopes, signed with ed25519."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+warrant-cell.workspace = true
+warrant-core.workspace = true
+warrant-ledger.workspace = true
+warrant-necessity.workspace = true
+
+base64.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+warrant-diff.workspace = true
