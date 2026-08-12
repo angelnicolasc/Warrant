@@ -1,0 +1,30 @@
+[package]
+name = "warrant-cli"
+description = "The `warrant` command: run any agent inside a cell and get a proof map back."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "warrant"
+path = "src/main.rs"
+
+[dependencies]
+warrant-attest.workspace = true
+warrant-cell.workspace = true
+warrant-core.workspace = true
+warrant-diff.workspace = true
+warrant-ledger.workspace = true
+warrant-necessity.workspace = true
+warrant-receipt.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
