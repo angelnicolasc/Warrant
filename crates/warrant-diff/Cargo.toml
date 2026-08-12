@@ -1,0 +1,23 @@
+[package]
+name = "warrant-diff"
+description = "Filesystem snapshots, overlay diffs, and exact hunk-subset application."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+warrant-core.workspace = true
+warrant-ledger.workspace = true
+
+ignore.workspace = true
+serde.workspace = true
+similar.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
