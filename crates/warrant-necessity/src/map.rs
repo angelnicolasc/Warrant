@@ -50,6 +50,22 @@ impl MapOutcome {
         matches!(self, MapOutcome::Mapped)
     }
 
+    /// The stable token this outcome is published under.
+    ///
+    /// Deliberately the same string the map serialises to, and held to that by
+    /// the test below. Anything that branches on an outcome — a workflow
+    /// reading a step output, a script reading the JSON — should be reading
+    /// one vocabulary, not two that drift.
+    pub fn name(&self) -> &'static str {
+        match self {
+            MapOutcome::Mapped => "mapped",
+            MapOutcome::NoChanges => "no_changes",
+            MapOutcome::NotSatisfied => "not_satisfied",
+            MapOutcome::Vacuous => "vacuous",
+            MapOutcome::UnstableProof => "unstable_proof",
+        }
+    }
+
     /// A one-line explanation for the terminal.
     pub fn describe(&self) -> &'static str {
         match self {
@@ -206,6 +222,37 @@ mod tests {
         assert!(!MapOutcome::NotSatisfied.has_coverage());
         assert!(!MapOutcome::UnstableProof.has_coverage());
         assert!(MapOutcome::Mapped.has_coverage());
+    }
+
+    /// Every outcome, listed by hand so that adding a variant fails here until
+    /// someone decides what it is called on the wire.
+    const EVERY_OUTCOME: &[MapOutcome] = &[
+        MapOutcome::Mapped,
+        MapOutcome::NoChanges,
+        MapOutcome::NotSatisfied,
+        MapOutcome::Vacuous,
+        MapOutcome::UnstableProof,
+    ];
+
+    #[test]
+    fn an_outcome_is_published_under_the_name_it_serialises_to() {
+        for outcome in EVERY_OUTCOME {
+            let serialised = serde_json::to_value(outcome).unwrap();
+            assert_eq!(
+                serialised.as_str().unwrap(),
+                outcome.name(),
+                "the JSON and the published token disagree about {outcome:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_two_outcomes_share_a_name() {
+        let mut names: Vec<_> = EVERY_OUTCOME.iter().map(|o| o.name()).collect();
+        names.sort_unstable();
+        let total = names.len();
+        names.dedup();
+        assert_eq!(names.len(), total, "two outcomes publish the same token");
     }
 
     #[test]

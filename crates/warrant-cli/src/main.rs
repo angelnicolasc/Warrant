@@ -241,6 +241,18 @@ struct MappingOptions {
     #[arg(long, value_name = "PATH")]
     out_markdown: Option<PathBuf>,
 
+    /// Append this run's step outputs to a file, normally `$GITHUB_OUTPUT`.
+    ///
+    /// The numbers a workflow branches on come off the map itself rather than
+    /// being re-derived in shell. The difference is not cosmetic: summing
+    /// `proven_lines` over `changed_lines` in `jq` publishes `0` for a vacuous
+    /// proof, where the map publishes nothing at all. Those are different
+    /// claims — one says the suite proved none of this change, the other says
+    /// the question could not be asked — and `Ratio::UNDEFINED` exists so the
+    /// first never renders as the second.
+    #[arg(long, value_name = "PATH")]
+    github_output: Option<PathBuf>,
+
     /// Exit non-zero on a finding, for continuous integration.
     #[arg(long)]
     strict: bool,
@@ -739,19 +751,97 @@ fn report(
         }
     }
 
+    let gate = gate_code(&outcome.map, options);
+
+    if let Some(path) = &options.github_output {
+        let outputs = github_outputs(&outcome.map, options, gate);
+        append_github_outputs(path, &outputs)
+            .with_context(|| format!("writing the step outputs to {}", path.display()))?;
+    }
+
+    Ok(ExitCode::from(gate))
+}
+
+/// The exit code this map earns, under the caller's thresholds.
+///
+/// Zero unless `--strict` was asked for: a finding is a fact about a change,
+/// and turning it into a failure is a decision the caller makes.
+fn gate_code(map: &warrant_necessity::NecessityMap, options: &MappingOptions) -> u8 {
     if !options.strict {
-        return Ok(ExitCode::SUCCESS);
+        return 0;
     }
 
     let below_floor = options
         .min_coverage
-        .zip(outcome.map.coverage.percent())
+        .zip(map.coverage.percent())
         .is_some_and(|(floor, actual)| actual < floor);
 
-    let failing =
-        outcome.map.has_tampering() || outcome.map.outcome != MapOutcome::Mapped || below_floor;
+    let failing = map.has_tampering() || map.outcome != MapOutcome::Mapped || below_floor;
+    if failing { 2 } else { 0 }
+}
 
-    Ok(if failing { ExitCode::from(2) } else { ExitCode::SUCCESS })
+/// The step outputs for one map, in the order a reader would want them.
+fn github_outputs(
+    map: &warrant_necessity::NecessityMap,
+    options: &MappingOptions,
+    gate: u8,
+) -> Vec<(&'static str, String)> {
+    let path =
+        |p: &Option<PathBuf>| p.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+
+    // Counts come off the files, which are populated whatever the outcome, so
+    // they stay true even where the ratio built from them does not mean
+    // anything. The percentage is the part that is allowed to be absent.
+    let changed: u64 = map.files.iter().map(|f| f.changed_lines).sum();
+    let proven: u64 = map.files.iter().map(|f| f.proven_lines).sum();
+
+    vec![
+        ("outcome", map.outcome.name().to_owned()),
+        // Empty rather than zero when the map is not a measurement. A vacuous
+        // proof did not prove none of the change; it could not be asked.
+        ("coverage", map.coverage.percent().map(|p| p.to_string()).unwrap_or_default()),
+        ("changed-lines", changed.to_string()),
+        ("proven-lines", proven.to_string()),
+        ("tampered", map.has_tampering().to_string()),
+        ("probes", map.probes.to_string()),
+        ("rounds", map.rounds.to_string()),
+        ("markdown", path(&options.out_markdown)),
+        ("json", path(&options.out_json)),
+        ("receipt", path(&options.receipt)),
+        ("gate", gate.to_string()),
+    ]
+}
+
+/// Append `key=value` pairs in the format GitHub Actions reads.
+///
+/// Appended, never written: the file belongs to the step, and other commands
+/// in it have their own outputs to add.
+fn append_github_outputs(path: &std::path::Path, outputs: &[(&str, String)]) -> Result<()> {
+    use std::io::Write;
+
+    let mut body = String::new();
+    for (key, value) in outputs {
+        body.push_str(&github_output_line(key, value));
+    }
+
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+    file.write_all(body.as_bytes())?;
+    Ok(())
+}
+
+/// One output, in the plain form where it is safe and the delimited form
+/// where it is not.
+///
+/// Two of these values are paths the caller chose. A newline inside one would
+/// otherwise let it forge further outputs, so anything that is not a single
+/// clean line goes in a heredoc whose delimiter is derived from the value —
+/// which is why the delimiter cannot occur inside it.
+fn github_output_line(key: &str, value: &str) -> String {
+    if !value.contains(['\n', '\r']) {
+        return format!("{key}={value}\n");
+    }
+    let delimiter = format!("warrant-{}", warrant_core::Hash::of(value.as_bytes()).short());
+    format!("{key}<<{delimiter}\n{value}\n{delimiter}\n")
 }
 
 fn print_captured(blobs: &Arc<dyn warrant_diff::ContentStore>, record: &warrant_cell::ExitRecord) {
@@ -782,6 +872,87 @@ mod tests {
     #[test]
     fn the_argument_parser_is_internally_consistent() {
         Cli::command().debug_assert();
+    }
+
+    /// The mapping flags off a `warrant map` invocation.
+    fn mapping(flags: &[&str]) -> MappingOptions {
+        let mut argv = vec!["warrant", "map"];
+        argv.extend_from_slice(flags);
+        match Cli::parse_from(argv).command {
+            Command::Map { mapping, .. } => mapping,
+            _ => unreachable!("that was a map"),
+        }
+    }
+
+    /// A map that ended some way other than `Mapped`, over a change that does
+    /// have lines in it.
+    fn unmeasurable(outcome: MapOutcome) -> warrant_necessity::NecessityMap {
+        use warrant_core::{Hash, PredicateHash};
+        let mut map = warrant_necessity::NecessityMap::no_changes(
+            PredicateHash::derive(&[b"p"]),
+            Hash::of(b"t"),
+        );
+        map.outcome = outcome;
+        map.files = vec![warrant_necessity::FileVerdict {
+            path: "docs/notes.md".into(),
+            change: warrant_diff::ChangeKind::Modified,
+            total_hunks: 1,
+            load_bearing_hunks: 0,
+            changed_lines: 12,
+            proven_lines: 0,
+            verification_surface: false,
+            tampered: false,
+        }];
+        map
+    }
+
+    #[test]
+    fn a_finding_is_a_failure_only_where_strict_was_asked_for() {
+        let map = unmeasurable(MapOutcome::Vacuous);
+        assert_eq!(gate_code(&map, &mapping(&[])), 0, "a finding is a fact, not a verdict");
+        assert_eq!(gate_code(&map, &mapping(&["--strict"])), 2);
+    }
+
+    #[test]
+    fn coverage_is_published_as_nothing_when_it_could_not_be_measured() {
+        // The shape this replaced: `jq` summing proven over changed publishes
+        // `0` here, which reads as "the suite proved none of this change".
+        // What actually happened is that the question could not be asked.
+        let outputs = github_outputs(&unmeasurable(MapOutcome::Vacuous), &mapping(&[]), 0);
+        let value =
+            |key: &str| outputs.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()).unwrap();
+
+        assert_eq!(value("outcome"), "vacuous");
+        assert_eq!(value("coverage"), "", "a ratio that is undefined publishes no number");
+        assert_eq!(value("changed-lines"), "12", "the count is true whatever the outcome");
+        assert_eq!(value("proven-lines"), "0");
+    }
+
+    #[test]
+    fn an_unset_path_publishes_an_empty_output_rather_than_a_word() {
+        let outputs = github_outputs(&unmeasurable(MapOutcome::Mapped), &mapping(&[]), 0);
+        for key in ["markdown", "json", "receipt"] {
+            let value = outputs.iter().find(|(k, _)| *k == key).map(|(_, v)| v.as_str());
+            assert_eq!(value, Some(""), "{key} should be empty, not \"None\"");
+        }
+    }
+
+    #[test]
+    fn a_value_carrying_a_newline_cannot_forge_a_second_output() {
+        let line = github_output_line("markdown", "body.md\ntampered=false");
+        assert!(!line.starts_with("markdown=body.md\n"), "the plain form would have forged one");
+
+        let mut lines = line.lines();
+        let opening = lines.next().unwrap();
+        let delimiter = opening.strip_prefix("markdown<<").expect("delimited form");
+        assert!(!line.contains(&format!("\n{delimiter}=")), "the delimiter is not a key");
+        assert_eq!(lines.next_back(), Some(delimiter), "and it closes the block");
+    }
+
+    #[test]
+    fn an_ordinary_value_stays_readable() {
+        assert_eq!(github_output_line("coverage", "40"), "coverage=40\n");
+        assert_eq!(github_output_line("coverage", ""), "coverage=\n");
     }
 
     #[test]
