@@ -95,14 +95,36 @@ Read the direction of the claim carefully, because it is the whole design. *Prov
 
 ## Install
 
-No binary release yet. Build from source with Rust 1.94 or newer:
-
 ```bash
-git clone https://github.com/angelnicolasc/warrant && cd warrant
-cargo install --path crates/warrant-cli
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/angelnicolasc/warrant/releases/latest/download/warrant-cli-installer.sh | sh
 ```
 
-One static binary, no runtime to install. Linux, macOS and Windows.
+One binary, no runtime, nothing to configure. Linux, macOS and Windows, on both x86-64 and arm64 — every one of them built on hardware of its own architecture rather than cross-compiled and hoped for.
+
+<details>
+<summary><b>Windows, Cargo, or checking what you just downloaded</b></summary>
+
+<br>
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/angelnicolasc/warrant/releases/latest/download/warrant-cli-installer.ps1 | iex"
+```
+
+```bash
+cargo install warrant-cli      # from source; the binary is still called `warrant`
+cargo binstall warrant-cli     # the released binary, no build
+```
+
+Piping a script into a shell is a reasonable thing to be unwilling to do, and this is a project about not taking claims on faith. Every archive ships beside its SHA-256, and every release carries [build provenance](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds) — so you can download the artefact and check that it came from this repository, built by this workflow, before anything runs:
+
+```bash
+gh release download v0.1.0 --repo angelnicolasc/warrant --pattern '*x86_64-unknown-linux-musl*'
+gh attestation verify warrant-cli-x86_64-unknown-linux-musl.tar.xz --repo angelnicolasc/warrant
+```
+
+The x86-64 Linux build links against musl, so it is genuinely static and runs unchanged inside whatever container you put it in. Building from source needs Rust 1.94 or newer, which is a floor set by `cranelift` arriving through `wasmtime`, not by this workspace.
+
+</details>
 
 ## Use it on the agent you already run
 
@@ -223,8 +245,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }   # a probe rebuilds the pre-state
-      - uses: angelnicolasc/warrant@main
+      - uses: angelnicolasc/warrant@v0.1.0
 ```
+
+Pinning the action pins the binary: the version tag you reference is the release it downloads, checksum-verified, cached on an immutable key. There is no build step — an action that compiled a `wasmtime`-backed workspace on every cache miss would be the slow job everybody learns to skip.
 
 The comment it leaves is the reading list, edited in place on every push rather than appended — a bot that posts a new comment each time is a bot people mute, and a muted finding is no finding at all:
 
@@ -244,7 +268,7 @@ The whole run is **one search**. Three renderings — the step summary, the JSON
 **It does not block your merges by default**, and that is a considered choice rather than a timid one. A documentation-only pull request maps as *vacuous* — the suite passed before it and passed after it, so it proves nothing about the change — which is a true statement and a terrible reason to stop a merge. Read the comments for a week, find out what your repository's numbers actually look like, and then turn the gate on:
 
 ```yaml
-      - uses: angelnicolasc/warrant@main
+      - uses: angelnicolasc/warrant@v0.1.0
         with:
           strict: true
           min-coverage: 40
@@ -299,14 +323,15 @@ export OPENAI_API_KEY=…     && warrant run "…" --provider openai --base-url 
 
 ## How this is checked
 
-A tool whose thesis is that unverified assertions should not be trusted has to hold itself to it. `cargo test --workspace` runs **408 tests**, and the ones that matter are not unit tests:
+A tool whose thesis is that unverified assertions should not be trusted has to hold itself to it. `cargo test --workspace` runs **416 tests**, and the ones that matter are not unit tests:
 
 | | |
 |---|---|
 | **Five property tests, 400 cases each** | Random file trees, random subsets. Applying nothing must reproduce the pre-state byte for byte; applying everything must reproduce the post-state byte for byte. Everything downstream is meaningless without those two. |
 | **Three `compile_fail` tests** | The type-system invariants (ADR-01, and *no `Delta` from model output*) are compiled by `cargo test`, and the suite fails if any of them ever starts compiling. |
 | **Fourteen end-to-end tests** | The real binary, on real repositories, with a real command as the proof — including both cases on the front page, the honest fix it must *not* flag, a trim that takes work off and re-runs the suite on what is left, and a rewritten git history it must detect. |
-| **The CI action is held to the tool** | One run must produce all three renderings, and the probe count in the map is checked against the probes the ledger recorded — three renderings may not cost three searches. The marker the action greps for is read out of `action.yml` and compared against the one the tool emits, because nothing compiles a composite action. |
+| **The CI action is held to the tool** | One run must produce all three renderings, and the probe count in the map is checked against the probes the ledger recorded — three renderings may not cost three searches. Two things are read out of `action.yml` and compared against what the tool actually emits: the marker it greps for, and every value it publishes. An expression naming an output that no longer exists is not an error in Actions — it is the empty string, so the action would keep looking healthy while publishing nothing. |
+| **And the action is held to itself** | Nothing compiles a composite action, so CI parses `action.yml`, runs `bash -n` over all ten of its scripts, and checks that every step an output reads from is a step that exists. Then it runs the action, on a fixture repository, and asserts the outputs and the comment body it produced. |
 | **The pool changes the schedule, never the map** | The same scenario is mapped at width 1 and width 4 and the two maps are compared whole, with only the two cost fields normalised away — so a field added later is compared too, rather than silently skipped. |
 | **A tamper suite that bypasses the API** | Entries removed, relabelled, resealed and edited on disk, plus the one attack a hash chain cannot see on its own (ADR-03). |
 | **Both model transports against a real socket** | Headers, body shape, tool results, every stop reason, error bodies, and which failures may be retried with an identical request — driven through a real HTTP server, for chat completions *and* Anthropic Messages, including a whole session end to end on each. |
@@ -470,6 +495,23 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 **Rejected.** Deriving the trim's validity from the map. It is one suite run to turn an inference into a measurement, on an operation whose entire value is that you can act on it without reading the diff.
 
 **Consequence.** A trim that does not hold is refused rather than offered, and says why: the load-bearing hunks are jointly necessary but not jointly sufficient, so the change relies on something the search could not isolate. Nothing is written to the working tree without `--write`, because unproven is not the same as unwanted — a docstring, a log line, or a feature with no test all land there.
+
+</details>
+
+<details>
+<summary><b>ADR-12 — The release is generated, and the generation is checked</b> · <i>implemented</i></summary>
+
+<br>
+
+**Decision.** Binaries are built by [`dist`](https://axodotdev.github.io/cargo-dist), from `dist-workspace.toml`, into a `release.yml` nobody hand-edits. CI runs `dist generate --check` and `dist plan` on every push, so the workflow cannot drift from the config that describes it and the config cannot describe a release that will not resolve.
+
+**Rationale.** A generated workflow sits oddly in a repository where every line is meant to be deliberate. It earns its place because release engineering is the one path that otherwise runs for the first time when it matters most — on a tag, with an audience — and because what it brings is not convenience: checksums beside every archive, and [build provenance](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds) generated in the workflow that did the building. A project whose entire argument is that claims should carry evidence cannot ship binaries that carry none.
+
+**Every target is built on its own architecture.** arm64 runners have been generally available for public repositories since [August 2025](https://github.blog/changelog/2025-08-07-arm64-hosted-runners-for-public-repositories-are-now-generally-available/) and private ones since [January 2026](https://github.blog/changelog/2026-01-29-arm64-standard-runners-are-now-available-in-private-repositories/), so nothing here is cross-compiled and hoped for. The x86-64 Linux build targets musl, which needs `musl-tools` on the runner — `blake3` compiles SIMD through `cc`, and without it that one leg of the matrix fails at link time and nowhere else.
+
+**Rejected.** Hand-rolling the matrix, which is the same work with a smaller test surface. Publishing under the name `warrant` on crates.io, which has been taken since 2024 — the crate is `warrant-cli` and the binary it installs is `warrant`.
+
+**Consequence for the action.** `cargo install` on a `wasmtime`-backed workspace is minutes; downloading a release is seconds. Since releases exist, the action downloads one, verifies its checksum, and caches it under an immutable version key. Building from source is still there behind `from-source: true`, for runners no release targets — opt-in, because that is not a cost anyone should pay by accident.
 
 </details>
 

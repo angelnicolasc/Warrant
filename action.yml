@@ -68,12 +68,25 @@ inputs:
     description: Post the map as a pull-request comment.
     required: false
     default: "true"
-  warrant-ref:
+  version:
     description: >-
-      Branch or tag of Warrant itself to build. Pin a tag to pin the
-      behaviour.
+      Which release of Warrant to run, as a tag like `v0.1.0`.
+
+      Left unset it is inferred, in this order: the tag this action was
+      referenced at, if that is a full version; otherwise the version declared
+      by the checkout of Warrant this action came from. Pinning the action
+      pins the binary, so the two cannot drift.
     required: false
-    default: main
+    default: ""
+  from-source:
+    description: >-
+      Build Warrant from source instead of downloading the release.
+
+      For runners no release targets. It is deliberately opt-in: a source
+      build of a wasmtime-backed workspace is minutes where a download is
+      seconds, and that is not a cost to pay by accident.
+    required: false
+    default: "false"
   receipt:
     description: Path to write the signed receipt to. Unset writes none.
     required: false
@@ -84,45 +97,212 @@ outputs:
     description: mapped, not_satisfied, vacuous, unstable_proof or no_changes.
     value: ${{ steps.map.outputs.outcome }}
   coverage:
-    description: Percentage of changed lines that are load-bearing, or empty.
+    description: >-
+      Percentage of changed lines that are load-bearing. Empty when the map is
+      not a measurement — a vacuous proof did not prove none of the change,
+      it could not be asked.
     value: ${{ steps.map.outputs.coverage }}
+  changed-lines:
+    description: Changed lines in the pull request, whatever the outcome.
+    value: ${{ steps.map.outputs.changed-lines }}
+  proven-lines:
+    description: Changed lines the proof depends on.
+    value: ${{ steps.map.outputs.proven-lines }}
   tampered:
     description: true when a load-bearing hunk sits on a verification surface.
     value: ${{ steps.map.outputs.tampered }}
+  probes:
+    description: Runs of the test command the map cost.
+    value: ${{ steps.map.outputs.probes }}
+  rounds:
+    description: Sequential rounds those probes took — the wall clock, not the compute.
+    value: ${{ steps.map.outputs.rounds }}
   markdown:
     description: Path to the rendered comment body.
     value: ${{ steps.map.outputs.markdown }}
+  version:
+    description: The release of Warrant that produced this map.
+    value: ${{ steps.resolve.outputs.version }}
 
 runs:
   using: composite
   steps:
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+    # Pinning the action pins the binary. The alternative — an action at one
+    # version driving a tool at another — makes a map impossible to reproduce
+    # from what the workflow file says.
+    - name: Resolve the version of Warrant to run
+      id: resolve
+      shell: bash
+      env:
+        REQUESTED: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        version="$REQUESTED"
 
-    # Cache the built binary rather than a target directory. A composite
-    # action shares the caller's workspace, and a build cache keyed on this
-    # repository's dependencies has no business landing in theirs.
+        # A full version tag is a release. A moving tag like `v0` or a branch
+        # is not, and falls through to the version the checkout declares.
+        if [ -z "$version" ]; then
+          case "$ACTION_REF" in
+            v[0-9]*.[0-9]*.[0-9]*) version="$ACTION_REF" ;;
+          esac
+        fi
+
+        if [ -z "$version" ]; then
+          declared=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' "$ACTION_PATH/Cargo.toml" | head -1)
+          if [ -n "$declared" ]; then version="v$declared"; fi
+        fi
+
+        if [ -z "$version" ]; then
+          echo 'Could not work out which release of Warrant to run.' >&2
+          echo 'Set the "version" input to a tag such as v0.1.0.' >&2
+          exit 1
+        fi
+
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "Warrant $version"
+
+    # One definition, read by both the restore and the save. A version tag is
+    # immutable, so a hit stays correct forever and there is no staleness to
+    # reason about.
+    - name: Cache key
+      id: key
+      shell: bash
+      env:
+        VERSION: ${{ steps.resolve.outputs.version }}
+        SOURCE: ${{ inputs.from-source }}
+      run: |
+        set -euo pipefail
+        echo "key=warrant-$VERSION-${{ runner.os }}-${{ runner.arch }}-$SOURCE" >> "$GITHUB_OUTPUT"
+
+    # Keyed on an immutable tag, so a hit stays correct forever and there is
+    # no staleness to reason about.
+    # Restore and save are split rather than using `actions/cache`, which
+    # saves whatever is in the path at the end of the job. Here that would
+    # store a binary this action never fetched — a workflow that installed its
+    # own build of Warrant would publish it under a release's key.
     - name: Restore Warrant
-      id: cached
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: ~/.warrant-bin
-        key: warrant-${{ runner.os }}-${{ inputs.warrant-ref }}
+        key: ${{ steps.key.outputs.key }}
 
-    - name: Build Warrant
-      if: steps.cached.outputs.cache-hit != 'true'
+    # Whether Warrant needs installing is a question about the filesystem, not
+    # about the cache. Asking it this way also means a job that installed
+    # Warrant itself is not made to fetch it again.
+    - name: Is Warrant already here?
+      id: have
       shell: bash
+      run: |
+        set -euo pipefail
+        if [ -x "$HOME/.warrant-bin/bin/warrant" ] || [ -x "$HOME/.warrant-bin/bin/warrant.exe" ]; then
+          echo "have=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "have=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Download Warrant
+      if: steps.have.outputs.have != 'true' && inputs.from-source != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        VERSION: ${{ steps.resolve.outputs.version }}
+      run: |
+        set -euo pipefail
+
+        # musl on x86-64 Linux rather than glibc: the binary then runs
+        # unchanged inside whatever container a job happens to use, which a
+        # glibc build linked against the runner image does not.
+        case "${{ runner.os }}-${{ runner.arch }}" in
+          Linux-X64)    target=x86_64-unknown-linux-musl;   archive=tar.xz ;;
+          Linux-ARM64)  target=aarch64-unknown-linux-gnu;   archive=tar.xz ;;
+          macOS-X64)    target=x86_64-apple-darwin;         archive=tar.xz ;;
+          macOS-ARM64)  target=aarch64-apple-darwin;        archive=tar.xz ;;
+          Windows-X64)  target=x86_64-pc-windows-msvc;      archive=zip    ;;
+          *)
+            echo "No Warrant release for ${{ runner.os }}-${{ runner.arch }}." >&2
+            echo 'Set "from-source: true" to build it here instead.' >&2
+            exit 1
+            ;;
+        esac
+
+        asset="warrant-cli-$target.$archive"
+        work="$RUNNER_TEMP/warrant-download"
+        rm -rf "$work"; mkdir -p "$work"
+
+        gh release download "$VERSION" --repo angelnicolasc/warrant \
+          --pattern "$asset" --pattern "$asset.sha256" --dir "$work"
+
+        # The download is the supply chain. Verifying it is not optional, and
+        # the archive's own checksum travels beside it for exactly this.
+        cd "$work"
+        if command -v sha256sum >/dev/null 2>&1; then
+          actual=$(sha256sum "$asset" | cut -d' ' -f1)
+        else
+          actual=$(shasum -a 256 "$asset" | cut -d' ' -f1)
+        fi
+        expected=$(cut -d' ' -f1 < "$asset.sha256" | tr -d '\r\n')
+        if [ "$actual" != "$expected" ]; then
+          echo "Checksum mismatch on $asset." >&2
+          echo "  expected $expected" >&2
+          echo "  actual   $actual" >&2
+          exit 1
+        fi
+
+        mkdir -p unpacked
+        if [ "$archive" = zip ]; then
+          # Git Bash on a Windows runner has no `unzip`. PowerShell is the one
+          # extractor guaranteed to be there.
+          powershell -NoProfile -Command "Expand-Archive -Path '$asset' -DestinationPath unpacked -Force"
+        else
+          tar -xJf "$asset" -C unpacked
+        fi
+
+        # Found rather than assumed: whether the archive nests its contents in
+        # a directory is the packager's business, not this script's.
+        binary=$(find unpacked -type f \( -name warrant -o -name warrant.exe \) | head -1)
+        test -n "$binary" || { echo "No warrant binary inside $asset." >&2; exit 1; }
+
+        mkdir -p ~/.warrant-bin/bin
+        cp "$binary" ~/.warrant-bin/bin/
+        chmod +x ~/.warrant-bin/bin/* || true
+
+    - name: Install Rust
+      if: steps.have.outputs.have != 'true' && inputs.from-source == 'true'
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Build Warrant from source
+      if: steps.have.outputs.have != 'true' && inputs.from-source == 'true'
+      shell: bash
+      env:
+        VERSION: ${{ steps.resolve.outputs.version }}
       run: |
         set -euo pipefail
         src="$RUNNER_TEMP/warrant-src"
         rm -rf "$src"
-        git clone --quiet --depth 1 --branch "${{ inputs.warrant-ref }}" \
+        git clone --quiet --depth 1 --branch "$VERSION" \
           https://github.com/angelnicolasc/warrant "$src"
         cargo install --locked --path "$src/crates/warrant-cli" --root ~/.warrant-bin
+
+    # Only what this action installed, and only when it installed something.
+    - name: Save Warrant
+      if: steps.have.outputs.have != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.warrant-bin
+        key: ${{ steps.key.outputs.key }}
 
     - name: Put Warrant on the path
       shell: bash
       run: echo "$HOME/.warrant-bin/bin" >> "$GITHUB_PATH"
+
+    # A separate step on purpose: `GITHUB_PATH` only takes effect for the ones
+    # that follow, so this is the first point at which the thing the rest of
+    # the action calls is the thing being checked.
+    - name: Warrant runs
+      shell: bash
+      run: warrant --version
 
     - name: Resolve the base commit
       shell: bash
@@ -151,6 +331,11 @@ runs:
     # One search. Every probe is a run of the repository's test command, so a
     # second rendering must never cost a second search: the terminal report,
     # the JSON and the comment body all come off the same map.
+    #
+    # The step outputs are written by the tool, not derived here. Shell
+    # arithmetic over the JSON is how `coverage` came to read `0` for a
+    # vacuous proof — a map that could not be measured, published as a map
+    # that measured nothing.
     - name: Map
       id: map
       shell: bash
@@ -158,6 +343,7 @@ runs:
         set -uo pipefail
         args=(map --against "$WARRANT_BASE" --ascii)
         args+=(--out-json warrant-map.json --out-markdown warrant-map.md)
+        args+=(--github-output "$GITHUB_OUTPUT")
         if [ -n '${{ inputs.proof }}' ];      then args+=(--proof '${{ inputs.proof }}'); fi
         if [ -n '${{ inputs.jobs }}' ];       then args+=(--jobs '${{ inputs.jobs }}'); fi
         if [ -n '${{ inputs.max-probes }}' ]; then args+=(--max-probes '${{ inputs.max-probes }}'); fi
@@ -173,26 +359,14 @@ runs:
         # The gate's verdict is held until the comment is posted. A finding
         # nobody can see is worse than no finding, and a step that fails here
         # ends the job before the comment would be written.
-        warrant "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
-        gate=${PIPESTATUS[0]}
+        warrant "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY" || true
 
-        if [ ! -f warrant-map.json ]; then
+        # A finding is not a failure to run. The tool writes `gate` last, so
+        # its absence means the map never got that far.
+        if ! grep -q '^gate=' "$GITHUB_OUTPUT"; then
           echo 'The map did not run to completion; see the log above.' >&2
-          exit "$gate"
+          exit 1
         fi
-
-        changed=$(jq '[.files[].changed_lines] | add // 0' warrant-map.json)
-        proven=$(jq '[.files[].proven_lines] | add // 0' warrant-map.json)
-        coverage=""
-        if [ "$changed" -gt 0 ]; then coverage=$(( proven * 100 / changed )); fi
-
-        {
-          echo "outcome=$(jq -r '.outcome' warrant-map.json)"
-          echo "tampered=$(jq -r '(.tamper | length) > 0' warrant-map.json)"
-          echo "coverage=$coverage"
-          echo "markdown=warrant-map.md"
-          echo "gate=$gate"
-        } >> "$GITHUB_OUTPUT"
 
     # One comment, edited in place. A bot that appends a new one on every push
     # is a bot people mute, and a muted finding is no finding at all.

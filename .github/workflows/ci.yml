@@ -101,11 +101,156 @@ jobs:
                   sys.exit(f"{step.get('name')!r} does not parse:\n{result.stderr}")
               checked += 1
 
-          assert checked >= 4, f"only {checked} scripts checked; the action lost steps"
+          assert checked >= 6, f"only {checked} scripts checked; the action lost steps"
           for name in ("outcome", "coverage", "tampered", "markdown"):
               assert name in action["outputs"], f"missing output {name}"
-          print(f"action.yml parses; {checked} shell scripts parse")
+
+          # Every step referred to by an output has to exist. A typo here is
+          # not an error at run time -- the expression evaluates to the empty
+          # string, and the action publishes nothing while looking healthy.
+          ids = {s.get("id") for s in action["runs"]["steps"] if s.get("id")}
+          reference = re.compile(r"steps\.([A-Za-z0-9_-]+)\.outputs")
+          for name, spec in action["outputs"].items():
+              for step in reference.findall(spec.get("value", "")):
+                  assert step in ids, f"output {name} reads step {step!r}, which has no such id"
+
+          print(f"action.yml parses; {checked} shell scripts parse; {len(ids)} steps identified")
           PY
+
+  # Parsing an action is not running one. This job runs it, against a
+  # repository built to have a known answer, and checks that what it published
+  # is that answer.
+  action-run:
+    name: the action, run
+    runs-on: ubuntu-latest
+    steps:
+      # Into a subdirectory, because the workspace root is about to become the
+      # repository under test. A composite action runs where the caller runs.
+      - uses: actions/checkout@v4
+        with:
+          path: warrant-src
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: warrant-src
+
+      # Installed where the action looks. Nothing is released for a commit
+      # that is still in review, so this is the build under test rather than
+      # whatever the last tag happened to contain.
+      - name: Build the Warrant under test
+        working-directory: warrant-src
+        run: |
+          set -euo pipefail
+          cargo build --release
+          mkdir -p ~/.warrant-bin/bin
+          cp target/release/warrant ~/.warrant-bin/bin/
+
+      # The same shape as the end-to-end fixtures: a suite that is red, one
+      # branch that fixes the code, one that edits the expectation instead.
+      # The proof is `git diff --no-index`, which needs no interpreter.
+      - name: Build a repository with a known answer
+        run: |
+          set -euo pipefail
+          git config --global user.name fixture
+          git config --global user.email fixture@example.invalid
+          git config --global init.defaultBranch main
+          git config --global core.autocrlf false
+
+          git init --quiet .
+          # The checkout, the ledger, and the renderings the action writes
+          # into the workspace. Without the last of those the second map would
+          # see the first map's output as part of the change under test.
+          printf 'warrant-src/\n.warrant/\nwarrant-map.*\n' > .gitignore
+          mkdir -p src tests docs
+          printf 'timeout = 99\n' > src/config.txt
+          printf 'retries = 3\n'  > src/handler.txt
+          printf 'timeout = 30\n' > tests/expected_config.txt
+          printf '# Notes\n'      > docs/notes.md
+          git add -A
+          git commit --quiet -m 'the suite is red'
+          echo "BASE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+          git branch laundered
+          git checkout --quiet -b honest
+
+      - name: The honest fix — the code moves to meet the expectation
+        run: |
+          set -euo pipefail
+          printf 'timeout = 30\n' > src/config.txt
+          printf '# Notes\n\nCorrected the timeout.\n' > docs/notes.md
+          printf 'retries = 5\n' > src/handler.txt
+
+      - name: Map it
+        id: honest
+        uses: ./warrant-src
+        with:
+          against: ${{ env.BASE }}
+          proof: "exit(git diff --no-index --quiet src/config.txt tests/expected_config.txt) == 0"
+          comment: false
+
+      - name: What it published is what happened
+        env:
+          OUTCOME: ${{ steps.honest.outputs.outcome }}
+          COVERAGE: ${{ steps.honest.outputs.coverage }}
+          CHANGED: ${{ steps.honest.outputs.changed-lines }}
+          PROVEN: ${{ steps.honest.outputs.proven-lines }}
+          TAMPERED: ${{ steps.honest.outputs.tampered }}
+          PROBES: ${{ steps.honest.outputs.probes }}
+          MARKDOWN: ${{ steps.honest.outputs.markdown }}
+          VERSION: ${{ steps.honest.outputs.version }}
+        run: |
+          set -euo pipefail
+          printf 'outcome=%s coverage=%s changed=%s proven=%s tampered=%s probes=%s version=%s\n' \
+            "$OUTCOME" "$COVERAGE" "$CHANGED" "$PROVEN" "$TAMPERED" "$PROBES" "$VERSION"
+
+          test "$OUTCOME"  = mapped     || { echo 'the proof should have held, and not vacuously' >&2; exit 1; }
+          test "$TAMPERED" = false      || { echo 'an honest fix must not be flagged' >&2; exit 1; }
+          test -n "$COVERAGE"           || { echo 'a mapped run publishes a number' >&2; exit 1; }
+          test "$COVERAGE" -gt 0        || { echo 'the config fix is load-bearing' >&2; exit 1; }
+          test "$PROVEN" -lt "$CHANGED" || { echo 'the scope creep should be unproven' >&2; exit 1; }
+          test "$PROBES" -gt 0          || { echo 'a map costs probes' >&2; exit 1; }
+          test -n "$VERSION"            || { echo 'the action should say which Warrant ran' >&2; exit 1; }
+
+          # The comment body is the product here, so it has to exist and to
+          # start with the marker the action greps for to edit it in place.
+          test -f "$MARKDOWN" || { echo "no comment body at $MARKDOWN" >&2; exit 1; }
+          head -1 "$MARKDOWN" | grep -q '^<!-- warrant:necessity-map -->$' \
+            || { echo 'the comment body does not start with the marker' >&2; exit 1; }
+
+      - name: The laundered green — the expectation moves to meet the code
+        run: |
+          set -euo pipefail
+          # Discard the honest fix first. Both branches start from the same
+          # commit, so an uncommitted change survives the switch otherwise —
+          # and a laundered scenario carrying the real fix proves nothing.
+          git reset --hard --quiet
+          git checkout --quiet laundered
+          printf 'timeout = 99\n' > tests/expected_config.txt
+          printf '# Notes\n\nAligned the fixtures.\n' > docs/notes.md
+          printf 'retries = 5\n' > src/handler.txt
+
+      - name: Map it, with the gate on
+        id: laundered
+        continue-on-error: true
+        uses: ./warrant-src
+        with:
+          against: ${{ env.BASE }}
+          proof: "exit(git diff --no-index --quiet src/config.txt tests/expected_config.txt) == 0"
+          comment: false
+          strict: true
+
+      - name: The gate went red, and said why
+        env:
+          RESULT: ${{ steps.laundered.outcome }}
+          TAMPERED: ${{ steps.laundered.outputs.tampered }}
+          MARKDOWN: ${{ steps.laundered.outputs.markdown }}
+        run: |
+          set -euo pipefail
+          test "$TAMPERED" = true || { echo 'the load-bearing test edit was not flagged' >&2; exit 1; }
+          test "$RESULT" = failure || { echo "strict should have failed the step, got $RESULT" >&2; exit 1; }
+          grep -q 'load-bearing test edit' "$MARKDOWN" \
+            || { echo 'the comment does not name the finding' >&2; exit 1; }
 
   release-build:
     name: release build
@@ -118,3 +263,45 @@ jobs:
         run: cargo build --release
       - name: The binary runs
         run: ./target/release/warrant --version
+
+  release-config:
+    name: the release pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      # One source of truth for the version: the config the workflow is
+      # generated from. Pinning it here as well would create two places to
+      # forget.
+      - name: Read the pinned dist version
+        id: dist
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^cargo-dist-version = "\(.*\)"$/\1/p' dist-workspace.toml)
+          test -n "$version" || { echo 'no cargo-dist-version in dist-workspace.toml' >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore dist
+        id: cached
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/dist
+          key: dist-${{ runner.os }}-${{ steps.dist.outputs.version }}
+
+      # Built from the registry rather than piped from a release script. It is
+      # slower exactly once, and it is the same standard this repository asks
+      # of everyone else's downloads.
+      - name: Install dist
+        if: steps.cached.outputs.cache-hit != 'true'
+        run: cargo install cargo-dist --locked --version ${{ steps.dist.outputs.version }}
+
+      # `release.yml` is generated, so nothing stops it drifting from the
+      # config that describes it except this.
+      - name: The release workflow matches its config
+        run: dist generate --check
+
+      # And the config has to be coherent — every target reachable, every
+      # runner named — which is otherwise only discovered by pushing a tag.
+      - name: The release plan resolves
+        run: dist plan

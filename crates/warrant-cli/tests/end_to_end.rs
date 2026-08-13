@@ -302,6 +302,45 @@ fn the_action_looks_for_the_marker_the_tool_actually_writes() {
     );
 }
 
+/// Every value the action publishes has to be one the tool actually wrote.
+///
+/// The action declares its outputs as `${{ steps.map.outputs.<name> }}`, and
+/// an undefined expression there is not an error — it is the empty string. So
+/// a renamed output does not fail the action; it silently starts publishing
+/// nothing, and every workflow branching on it takes the other branch.
+#[test]
+fn every_value_the_action_publishes_is_one_the_tool_writes() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let action = std::fs::read_to_string(root.join("action.yml")).unwrap();
+
+    let repo = fixture();
+    git(repo.path(), &["checkout", "--quiet", "honest", "--", "."]);
+    run_warrant(repo.path(), &["map", "--proof", PROOF, "--ascii", "--github-output", "o.txt"]);
+
+    let written = std::fs::read_to_string(repo.path().join("o.txt")).unwrap();
+    let keys: Vec<&str> =
+        written.lines().filter_map(|line| line.split_once(['=', '<']).map(|(k, _)| k)).collect();
+    assert!(keys.contains(&"gate"), "the tool wrote nothing recognisable: {written:?}");
+
+    // Read the demands out of the action rather than restating them here: a
+    // list kept in two places is a list that disagrees with itself.
+    let mut demanded = 0;
+    for (_, rest) in
+        action.match_indices("steps.map.outputs.").map(|(i, m)| (i, &action[i + m.len()..]))
+    {
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        assert!(
+            keys.contains(&name.as_str()),
+            "action.yml publishes `{name}`, which the tool never writes. It has: {keys:?}"
+        );
+        demanded += 1;
+    }
+    assert!(demanded >= 5, "only {demanded} outputs cross-checked; the scan stopped working");
+}
+
 #[test]
 fn the_record_verifies_and_matches_repository_history() {
     let repo = fixture();
