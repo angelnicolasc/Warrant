@@ -18,6 +18,7 @@ pub mod anthropic;
 pub mod attempt;
 pub mod error;
 pub mod forensics;
+pub mod openai;
 pub mod policy;
 pub mod provider;
 pub mod session;

@@ -10,9 +10,10 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, bail};
 use warrant_agent::anthropic::AnthropicProvider;
+use warrant_agent::openai::{OpenAiProvider, TokenLimitField};
 use warrant_agent::{
-    ApproveAll, ApproveWithin, Approver, AttemptConfig, BestOfN, Fixture, Policy, RunRecord,
-    Services, Session, SessionConfig, Workspace, bisect, refutations,
+    ApproveAll, ApproveWithin, Approver, AttemptConfig, BestOfN, Fixture, Policy, Provider,
+    RunRecord, Services, Session, SessionConfig, Workspace, bisect, refutations,
 };
 use warrant_attest::{Attestor, Predicate};
 use warrant_cell::{Cell, WorkspaceCell};
@@ -21,12 +22,47 @@ use warrant_ledger::Ledger;
 
 use crate::render::{Glyphs, render_map};
 
+/// Which wire format to speak.
+///
+/// Two formats cover the field. Everything that is not Anthropic — OpenAI,
+/// DeepSeek, Groq, Together, OpenRouter, and anything behind Ollama, vLLM or
+/// LM Studio — accepts the chat-completions shape, so this is a choice of
+/// transport rather than a per-vendor integration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum Wire {
+    /// Pick from whichever API key is present.
+    Auto,
+    /// Anthropic Messages.
+    Anthropic,
+    /// OpenAI chat completions.
+    Openai,
+    /// DeepSeek, which speaks chat completions.
+    Deepseek,
+    /// A local server speaking chat completions, at `--base-url`.
+    Local,
+}
+
 /// Options shared by the commands that drive a model.
 #[derive(clap::Args, Clone, Debug)]
 pub struct AgentOptions {
-    /// Which model to ask.
-    #[arg(long, default_value = "claude-opus-5", value_name = "ID")]
-    pub model: String,
+    /// Which API to talk to. Defaults to whichever key is set.
+    #[arg(long, value_enum, default_value_t = Wire::Auto)]
+    pub provider: Wire,
+
+    /// Override the API endpoint. Required for `--provider local`.
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
+
+    /// Which field carries the output ceiling on chat-completions endpoints.
+    ///
+    /// Newer OpenAI reasoning models require `max_completion_tokens`;
+    /// DeepSeek and most compatible servers accept only `max_tokens`.
+    #[arg(long, value_name = "FIELD", default_value = "max_tokens")]
+    pub token_field: String,
+
+    /// Which model to ask. Defaults to a sensible one for the provider.
+    #[arg(long, value_name = "ID")]
+    pub model: Option<String>,
 
     /// Hard ceiling on turns.
     #[arg(long, default_value_t = 40, value_name = "N")]
@@ -64,12 +100,98 @@ impl AgentOptions {
         policy
     }
 
-    fn session(&self, work_root: PathBuf) -> SessionConfig {
-        let mut config = SessionConfig::new(&self.model, work_root);
+    /// Which wire format to actually use, resolving `auto`.
+    fn wire(&self) -> Result<Wire> {
+        if self.provider != Wire::Auto {
+            return Ok(self.provider);
+        }
+        if std::env::var(warrant_agent::anthropic::API_KEY_VAR).is_ok() {
+            return Ok(Wire::Anthropic);
+        }
+        if std::env::var(warrant_agent::openai::API_KEY_VAR).is_ok() {
+            return Ok(Wire::Openai);
+        }
+        bail!(
+            "no model credentials found. Set ANTHROPIC_API_KEY, or OPENAI_API_KEY together with \
+             --provider openai|deepseek|local (any endpoint speaking chat completions works, \
+             including one running on this machine).\n\
+             `warrant wrap` and `warrant map` need no model at all."
+        )
+    }
+
+    fn model(&self) -> Result<String> {
+        if let Some(model) = &self.model {
+            return Ok(model.clone());
+        }
+        Ok(match self.wire()? {
+            Wire::Anthropic | Wire::Auto => "claude-opus-5",
+            Wire::Deepseek => "deepseek-chat",
+            Wire::Openai => "gpt-5",
+            // A local server hosts whatever it hosts; there is no default
+            // worth guessing.
+            Wire::Local => {
+                bail!("--provider local needs --model naming what the server hosts")
+            }
+        }
+        .to_owned())
+    }
+
+    fn session(&self, work_root: PathBuf) -> Result<SessionConfig> {
+        let mut config = SessionConfig::new(self.model()?, work_root);
         config.max_turns = self.max_turns;
         config.stuck_patience = self.stuck_after;
         config.budget.tokens = self.max_tokens;
-        config
+        Ok(config)
+    }
+
+    /// Build the transport this run will use.
+    fn provider(&self) -> Result<Box<dyn Provider>> {
+        let wire = self.wire()?;
+        if wire == Wire::Anthropic {
+            let mut provider =
+                AnthropicProvider::from_env().context("starting the model provider")?;
+            if let Some(url) = &self.base_url {
+                provider = provider.with_base_url(url.clone());
+            }
+            return Ok(Box::new(provider));
+        }
+
+        let field = TokenLimitField::parse(&self.token_field).ok_or_else(|| {
+            anyhow::anyhow!(
+                "--token-field must be `max_tokens` or `max_completion_tokens`, not `{}`",
+                self.token_field
+            )
+        })?;
+
+        // DeepSeek's key may live under its own name; everything else on this
+        // wire uses OPENAI_API_KEY, and an explicit base URL redirects it.
+        let key = match wire {
+            Wire::Deepseek => std::env::var("DEEPSEEK_API_KEY")
+                .or_else(|_| std::env::var(warrant_agent::openai::API_KEY_VAR))
+                .map_err(|_| {
+                    anyhow::anyhow!("set DEEPSEEK_API_KEY (or OPENAI_API_KEY) to use DeepSeek")
+                })?,
+            // A local server usually wants no key at all, and rejecting the
+            // run for the absence of one would be theatre.
+            Wire::Local => std::env::var(warrant_agent::openai::API_KEY_VAR)
+                .unwrap_or_else(|_| "not-required".to_owned()),
+            _ => std::env::var(warrant_agent::openai::API_KEY_VAR)
+                .map_err(|_| anyhow::anyhow!("set OPENAI_API_KEY to use this provider"))?,
+        };
+
+        let mut provider = OpenAiProvider::new(key).with_token_field(field);
+        provider = match (&self.base_url, wire) {
+            (Some(url), _) => provider.with_base_url(url.clone()).labelled("openai-compatible"),
+            (None, Wire::Deepseek) => provider
+                .with_base_url(warrant_agent::openai::DEEPSEEK_BASE_URL)
+                .labelled("deepseek"),
+            (None, Wire::Local) => bail!("--provider local needs --base-url"),
+            (None, _) => match std::env::var(warrant_agent::openai::BASE_URL_VAR) {
+                Ok(url) if !url.trim().is_empty() => provider.with_base_url(url),
+                _ => provider,
+            },
+        };
+        Ok(Box::new(provider))
     }
 
     fn approver(&self) -> Box<dyn Approver> {
@@ -104,10 +226,6 @@ fn bench(root: &Path, policy: Policy) -> Result<Bench> {
     Ok(Bench { work_root: ledger.root().join("work"), ledger, services })
 }
 
-fn provider() -> Result<AnthropicProvider> {
-    AnthropicProvider::from_env().context("starting the model provider")
-}
-
 /// `warrant run` — drive a model against this repository.
 pub fn run(
     root: &Path,
@@ -118,7 +236,7 @@ pub fn run(
     glyphs: &Glyphs,
 ) -> Result<std::process::ExitCode> {
     let bench = bench(root, options.policy())?;
-    let provider = provider()?;
+    let provider = options.provider()?;
     let approver = options.approver();
 
     // The agent works in the operator's actual checkout. Probe cells and
@@ -135,10 +253,10 @@ pub fn run(
 
     println!();
     let mut session = Session::new(
-        &provider,
+        provider.as_ref(),
         approver.as_ref(),
         workspace,
-        options.session(bench.work_root.clone()),
+        options.session(bench.work_root.clone())?,
     );
     let outcome = session.run(task)?;
 
@@ -183,7 +301,7 @@ pub fn run(
             false,
             isolation,
             Some(task.to_owned()),
-            Some(format!("warrant run ({})", options.model)),
+            Some(format!("warrant run ({})", options.model()?)),
             &bench.ledger,
         )?;
         std::fs::write(path, receipt.to_json()?)
@@ -208,7 +326,7 @@ pub fn best_of_n(
     glyphs: &Glyphs,
 ) -> Result<std::process::ExitCode> {
     let bench = bench(root, options.policy())?;
-    let provider = provider()?;
+    let provider = options.provider()?;
     let approver = options.approver();
 
     let mut origin_cell = WorkspaceCell::adopt(
@@ -227,10 +345,10 @@ pub fn best_of_n(
     println!("  proof: {proof}\n");
 
     let best = BestOfN::new(
-        &provider,
+        provider.as_ref(),
         approver.as_ref(),
         bench.services.clone(),
-        options.session(bench.work_root.clone()),
+        options.session(bench.work_root.clone())?,
         bench.work_root.join("attempts"),
     );
     let (adjudication, states) = best.run(&origin, task, &config)?;

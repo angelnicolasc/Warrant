@@ -443,7 +443,17 @@ impl<'a> Session<'a> {
         }
         // Resolved before the workspace is borrowed mutably.
         let probe_root = self.probe_root_for_turn();
-        invoke(tool, input, &mut self.workspace, &probe_root)
+        match invoke(tool, input, &mut self.workspace, &probe_root) {
+            // A tool called with arguments it cannot use is the model's
+            // mistake to correct, not a reason to end the run. Reporting it
+            // back is what lets the next turn fix it — and it is the common
+            // case on transports where tool arguments arrive as a JSON string
+            // the model has to get right by hand.
+            Err(AgentError::BadToolInput { tool, reason }) => {
+                Ok(ToolOutcome::failed(format!("`{tool}` could not use those arguments: {reason}")))
+            }
+            other => other,
+        }
     }
 
     fn probe_root_for_turn(&self) -> PathBuf {
@@ -755,6 +765,34 @@ mod tests {
 
         assert_eq!(outcome.rejected_turns, 0);
         assert_eq!(guards.read("one.txt"), "kept");
+    }
+
+    /// Arguments a tool cannot use are the model's to correct. Ending the run
+    /// would waste everything done so far over a mistake the next turn could
+    /// fix — and on transports where tool arguments arrive as a JSON string,
+    /// this is the routine case rather than the exotic one.
+    #[test]
+    fn arguments_a_tool_cannot_use_are_reported_rather_than_fatal() {
+        let (guards, workspace) = scratch_workspace(&[("a.txt", "x")]);
+        let provider = ScriptedProvider::new([
+            // `fs` needs an `op`; this has none, and the arguments are null
+            // besides — exactly what an unparseable tool call produces.
+            ModelResponse::calling("1", "fs", serde_json::Value::Null),
+            write("2", "recovered.txt", "the run continued"),
+            ModelResponse::saying("recovered"),
+        ]);
+
+        let mut session = Session::new(&provider, &ApproveAll, workspace, config(&guards));
+        let outcome = session.run("call a tool badly, then recover").unwrap();
+
+        assert_eq!(outcome.stop, StopCondition::Finished, "the run must survive a bad call");
+        assert_eq!(guards.read("recovered.txt"), "the run continued");
+
+        let told = session.transcript().iter().flat_map(|m| &m.content).any(|block| {
+            matches!(block, ContentBlock::ToolResult { content, is_error, .. }
+                if *is_error && content.contains("could not use those arguments"))
+        });
+        assert!(told, "the model must be told what the tool needed");
     }
 
     #[test]

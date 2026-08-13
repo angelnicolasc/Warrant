@@ -9,112 +9,21 @@
 //! the *live* endpoint, which this build had no credentials for — that is
 //! stated in the crate documentation rather than left to be discovered.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+mod common;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use common::FakeApi;
 
 use serde_json::{Value, json};
 use warrant_agent::anthropic::AnthropicProvider;
 use warrant_agent::{ContentBlock, Message, ModelRequest, Provider, StopReason, ToolSpec};
 
-/// What the fake API received and what it will send back.
-struct Recorder {
-    requests: Mutex<Vec<Value>>,
-    headers: Mutex<Vec<Vec<(String, String)>>>,
-    calls: AtomicUsize,
-}
-
-/// A server that answers `/v1/messages` from a script of `(status, body)`.
-struct FakeApi {
-    base_url: String,
-    recorder: Arc<Recorder>,
-    shutdown: Option<std::thread::JoinHandle<()>>,
-    server: Arc<tiny_http::Server>,
-}
-
-impl FakeApi {
-    fn start(script: Vec<(u16, Value)>) -> Self {
-        let server = Arc::new(tiny_http::Server::http("127.0.0.1:0").expect("a free port"));
-        let base_url = format!("http://{}", server.server_addr());
-        let recorder = Arc::new(Recorder {
-            requests: Mutex::new(Vec::new()),
-            headers: Mutex::new(Vec::new()),
-            calls: AtomicUsize::new(0),
-        });
-
-        let worker_server = Arc::clone(&server);
-        let worker_recorder = Arc::clone(&recorder);
-        let handle = std::thread::spawn(move || {
-            for mut request in worker_server.incoming_requests() {
-                let mut body = String::new();
-                let _ = std::io::Read::read_to_string(&mut request.as_reader(), &mut body);
-
-                worker_recorder
-                    .requests
-                    .lock()
-                    .unwrap()
-                    .push(serde_json::from_str(&body).unwrap_or(Value::Null));
-                worker_recorder.headers.lock().unwrap().push(
-                    request
-                        .headers()
-                        .iter()
-                        .map(|h| {
-                            (
-                                h.field.as_str().as_str().to_ascii_lowercase(),
-                                h.value.as_str().to_owned(),
-                            )
-                        })
-                        .collect(),
-                );
-
-                let index = worker_recorder.calls.fetch_add(1, Ordering::SeqCst);
-                let (status, payload) = script.get(index).cloned().unwrap_or((
-                    500,
-                    json!({ "error": { "type": "script_exhausted", "message": "no more" } }),
-                ));
-
-                let encoded = serde_json::to_vec(&payload).unwrap();
-                let response =
-                    tiny_http::Response::from_data(encoded).with_status_code(status).with_header(
-                        tiny_http::Header::from_bytes(
-                            &b"content-type"[..],
-                            &b"application/json"[..],
-                        )
-                        .unwrap(),
-                    );
-                let _ = request.respond(response);
-            }
-        });
-
-        FakeApi { base_url, recorder, shutdown: Some(handle), server }
-    }
-
-    fn provider(&self) -> AnthropicProvider {
-        AnthropicProvider::new("test-key")
-            .with_base_url(&self.base_url)
-            .with_retry_delay(Duration::from_millis(1))
-    }
-
-    fn requests(&self) -> Vec<Value> {
-        self.recorder.requests.lock().unwrap().clone()
-    }
-
-    fn headers(&self, index: usize) -> Vec<(String, String)> {
-        self.recorder.headers.lock().unwrap()[index].clone()
-    }
-
-    fn call_count(&self) -> usize {
-        self.recorder.calls.load(Ordering::SeqCst)
-    }
-}
-
-impl Drop for FakeApi {
-    fn drop(&mut self) {
-        self.server.unblock();
-        if let Some(handle) = self.shutdown.take() {
-            let _ = handle.join();
-        }
-    }
+fn provider(api: &FakeApi) -> AnthropicProvider {
+    AnthropicProvider::new("test-key")
+        .with_base_url(api.base_url())
+        .with_retry_delay(Duration::from_millis(1))
 }
 
 fn request() -> ModelRequest {
@@ -145,7 +54,7 @@ fn ok_body(text: &str) -> Value {
 #[test]
 fn a_request_arrives_with_the_headers_the_api_requires() {
     let api = FakeApi::start(vec![(200, ok_body("hello"))]);
-    api.provider().complete(&request()).unwrap();
+    provider(&api).complete(&request()).unwrap();
 
     let headers = api.headers(0);
     let get = |name: &str| {
@@ -159,7 +68,7 @@ fn a_request_arrives_with_the_headers_the_api_requires() {
 #[test]
 fn the_body_that_goes_over_the_wire_is_the_documented_shape() {
     let api = FakeApi::start(vec![(200, ok_body("hello"))]);
-    api.provider().complete(&request()).unwrap();
+    provider(&api).complete(&request()).unwrap();
 
     let sent = &api.requests()[0];
     assert_eq!(sent["model"], "claude-opus-5");
@@ -185,7 +94,7 @@ fn a_tool_call_comes_back_ready_to_dispatch() {
         }),
     )]);
 
-    let response = api.provider().complete(&request()).unwrap();
+    let response = provider(&api).complete(&request()).unwrap();
     assert_eq!(response.stop_reason, StopReason::ToolUse);
     assert!(response.wants_tools());
 
@@ -210,7 +119,7 @@ fn tool_results_travel_back_in_the_next_request() {
         content: "exit 1".into(),
         is_error: true,
     }]));
-    api.provider().complete(&next).unwrap();
+    provider(&api).complete(&next).unwrap();
 
     let sent = &api.requests()[0];
     assert_eq!(sent["messages"][1]["content"][0]["type"], "tool_use");
@@ -228,7 +137,7 @@ fn a_rate_limit_is_retried_with_the_identical_request() {
         (200, ok_body("finally")),
     ]);
 
-    let response = api.provider().complete(&request()).unwrap();
+    let response = provider(&api).complete(&request()).unwrap();
     assert_eq!(response.text(), "finally");
     assert_eq!(api.call_count(), 3);
 
@@ -245,7 +154,7 @@ fn a_request_the_server_has_already_judged_is_not_retried() {
         json!({ "error": { "type": "invalid_request_error", "message": "max_tokens is too large" } }),
     )]);
 
-    let error = api.provider().complete(&request()).unwrap_err();
+    let error = provider(&api).complete(&request()).unwrap_err();
     assert_eq!(api.call_count(), 1, "a 400 must not be repeated");
     assert!(error.to_string().contains("invalid_request_error"), "{error}");
     assert!(error.to_string().contains("max_tokens is too large"));
@@ -257,7 +166,7 @@ fn retries_are_bounded_and_the_last_failure_is_reported() {
         (503, json!({ "error": { "type": "overloaded_error", "message": "overloaded" } }));
     let api = FakeApi::start(vec![failing.clone(), failing.clone(), failing.clone(), failing]);
 
-    let error = api.provider().with_max_retries(2).complete(&request()).unwrap_err();
+    let error = provider(&api).with_max_retries(2).complete(&request()).unwrap_err();
     assert_eq!(api.call_count(), 3, "one attempt plus two retries");
     assert!(error.to_string().contains("overloaded"), "{error}");
 }
@@ -268,7 +177,7 @@ fn an_error_body_is_read_rather_than_lost_to_the_status_code() {
         401,
         json!({ "error": { "type": "authentication_error", "message": "invalid x-api-key" } }),
     )]);
-    let error = api.provider().complete(&request()).unwrap_err();
+    let error = provider(&api).complete(&request()).unwrap_err();
     assert!(error.to_string().contains("invalid x-api-key"), "{error}");
 }
 
@@ -328,7 +237,7 @@ fn a_session_runs_end_to_end_over_http() {
     )
     .unwrap();
 
-    let provider = api.provider();
+    let provider = provider(&api);
     let approver = warrant_agent::ApproveAll;
     let mut session = warrant_agent::Session::new(
         &provider,

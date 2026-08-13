@@ -158,7 +158,7 @@ warrant map --against origin/main --strict --min-coverage 40
 
 ### Warrant as the harness
 
-The commands above need no model. These drive one, and need `ANTHROPIC_API_KEY`:
+The commands above need no model. These drive one:
 
 | | |
 |---|---|
@@ -178,9 +178,20 @@ warrant do "migrate auth to JWT" --attempts 5 \
 
 Five agents and five diffs is five times the review. Five agents and one proven answer is less review than one agent, because the branches that could not discharge the claim never reach a person.
 
+**Any model, including one on your own machine.** Two wire formats cover the field, and `--provider` picks between them:
+
+```bash
+export ANTHROPIC_API_KEY=…   && warrant run "…"                      # Anthropic Messages
+export DEEPSEEK_API_KEY=…    && warrant run "…" --provider deepseek  # DeepSeek
+export OPENAI_API_KEY=…      && warrant run "…" --provider openai    # OpenAI
+warrant run "…" --provider local --base-url http://localhost:11434 --model qwen3-coder
+```
+
+The last line needs no key and no network — Ollama, vLLM, LM Studio and every hosted gateway (Groq, Together, OpenRouter) speak chat completions. Newer OpenAI reasoning models want `--token-field max_completion_tokens`; everything else accepts the default.
+
 ## How this is checked
 
-A tool whose thesis is that unverified assertions should not be trusted has to hold itself to it. `cargo test --workspace` runs **366 tests**, and the ones that matter are not unit tests:
+A tool whose thesis is that unverified assertions should not be trusted has to hold itself to it. `cargo test --workspace` runs **390 tests**, and the ones that matter are not unit tests:
 
 | | |
 |---|---|
@@ -188,7 +199,7 @@ A tool whose thesis is that unverified assertions should not be trusted has to h
 | **Three `compile_fail` tests** | The type-system invariants (ADR-01, and *no `Delta` from model output*) are compiled by `cargo test`, and the suite fails if any of them ever starts compiling. |
 | **Ten end-to-end tests** | The real binary, on real repositories, with a real command as the proof — including the case on the front page, the honest fix it must *not* flag, and a rewritten git history it must detect. |
 | **A tamper suite that bypasses the API** | Entries removed, relabelled, resealed and edited on disk, plus the one attack a hash chain cannot see on its own (ADR-03). |
-| **A model transport against a real socket** | Headers, body shape, tool results, every stop reason, error bodies, and which failures may be retried with an identical request — driven through a real HTTP server, including a whole session end to end. |
+| **Both model transports against a real socket** | Headers, body shape, tool results, every stop reason, error bodies, and which failures may be retried with an identical request — driven through a real HTTP server, for Anthropic Messages *and* chat completions, including a whole session end to end on each. |
 | **Round trips through the record alone** | A session replays from its ledger with every request digest checked; a frozen run reproduces in a world that shares no store, no ledger and no directory with the original. |
 
 `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` are clean. Every commit in the history compiles on its own.
@@ -269,7 +280,22 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 </details>
 
 <details>
-<summary><b>ADR-06 — Hunks are applied to the pristine pre-image, never patched</b> · <i>implemented</i></summary>
+<summary><b>ADR-06 — Two wire formats, not one integration per vendor</b> · <i>implemented</i></summary>
+
+<br>
+
+**Decision.** `Provider` is a trait, and exactly two transports implement it: Anthropic Messages, and OpenAI chat completions. The second covers OpenAI, DeepSeek, Groq, Together, Fireworks, OpenRouter and anything self-hosted behind Ollama, vLLM or LM Studio — because they all accept the same request shape.
+
+**Rationale.** A per-vendor integration is a maintenance surface that grows with the market. A per-*format* integration is two, and the second one is what lets Warrant run against a model on your own laptop with no key and no network.
+
+**Where the formats genuinely differ**, each being somewhere a careless adapter breaks: the system prompt is a message rather than a field; tool arguments arrive as a JSON string rather than an object; a tool result is its own message with `role: "tool"` rather than a block inside a user message, and one turn can produce several; token counts are named differently; and the field carrying the output ceiling changed name for newer OpenAI reasoning models, so it is selectable rather than guessed.
+
+**Consequence worth stating.** On the chat-completions wire a model must serialise tool arguments by hand, and sometimes emits JSON that will not parse. That is routine, not exceptional — so an unparseable call is passed through and the tool reports what it needed, giving the model a turn to correct itself. Ending the run would throw away everything done so far over a mistake the next turn fixes.
+
+</details>
+
+<details>
+<summary><b>ADR-07 — Hunks are applied to the pristine pre-image, never patched</b> · <i>implemented</i></summary>
 
 <br>
 
@@ -282,7 +308,7 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 </details>
 
 <details>
-<summary><b>ADR-07 — The cell backend is pluggable, and this release ships the portable one</b> · <i>implemented</i></summary>
+<summary><b>ADR-08 — The cell backend is pluggable, and this release ships the portable one</b> · <i>implemented</i></summary>
 
 <br>
 
@@ -295,7 +321,7 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 </details>
 
 <details>
-<summary><b>ADR-08 — Warrant owns the sandbox, not the loop</b> · <i>implemented</i></summary>
+<summary><b>ADR-09 — Warrant owns the sandbox, not the loop</b> · <i>implemented</i></summary>
 
 <br>
 
@@ -310,7 +336,7 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 </details>
 
 <details>
-<summary><b>ADR-09 — Self-evolution is not a feature</b> · <i>decision; nothing is shipped, which is the point</i></summary>
+<summary><b>ADR-10 — Self-evolution is not a feature</b> · <i>decision; nothing is shipped, which is the point</i></summary>
 
 <br>
 
@@ -331,7 +357,7 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 | **Proofs** | [`wasmtime`](https://wasmtime.dev) + [`wasm-encoder`](https://docs.rs/wasm-encoder) | Deterministic, content-hashable, sandboxed, and opaque to the agent by construction. 2.41× native and improving yearly; `wazero` has been flat near 4.7× for two years |
 | **Ledger** | Embedded append-only, BLAKE3, in-toto envelopes | No server, no operational burden — and existing supply-chain tooling reads the output unmodified |
 | **Receipts** | in-toto Statement v1 in a DSSE envelope, `ed25519-dalek` | Standard formats end to end. The signature covers a pre-authentication encoding, so it cannot be replayed across payload types |
-| **Model transport** | `ureq` — blocking HTTP | A session makes one model call at a time and the workload is probe-bound, so an async runtime would buy nothing while appearing on every error path |
+| **Model transport** | `ureq` — blocking HTTP, two wire formats | A session makes one model call at a time and the workload is probe-bound, so an async runtime would buy nothing while appearing on every error path |
 | **Surface** | `clap`, one static binary | `cargo install` and nothing else — a real distribution advantage over every TypeScript competitor |
 
 **No async runtime.** The workload is probe-bound rather than IO-bound: a probe is a snapshot restore followed by a process that runs for seconds, and probes within one search are sequential because they share a cell. Adding an executor would have bought nothing and cost a dependency on every error path.
@@ -343,18 +369,18 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 - **It does not verify correctness.** Warrant reports coverage. **Necessity is not sufficiency** — a load-bearing hunk is proven *relative to the declared proof*, and nothing more. Every receipt says so in writing.
 - **It does not replace review.** It tells you which 20% of a diff deserves the attention you were spreading across all of it.
 - **It does not need to run the model.** `wrap` and `map` involve no API key at all and work with the agent you already have. `run` and `do` are there when you want Warrant to *be* the harness, and are strictly optional.
-- **It does not modify itself.** No self-improvement loop, deliberately — see ADR-09.
+- **It does not modify itself.** No self-improvement loop, deliberately — see ADR-10.
 - **It does not do team scopes or multiplayer.** [QM](https://github.com/yc-software/qm) does, well. Warrant exposes its ledger so systems like it can consume proof maps as a substrate.
 
 ## Limitations
 
 - **Flaky and order-dependent tests degrade the map.** Delta debugging assumes a stable proof. Warrant evaluates the proof twice on the agent's result before mapping anything, and reports a proof that disagrees with itself as *unstable* rather than producing a map from contradictory probes. A suite that is flaky at lower rates will still produce a noisier map, and hunks the confirmation pass had to drop are reported as monotonicity violations rather than hidden.
 - **Refactors and formatting changes read as unproven.** They usually are, relative to a behavioural proof. There is no AST-equivalence pass in this release, so a pure rename shows up in the unproven region alongside genuinely dead work.
-- **Isolation is directory-level.** Commands run as the invoking user; the network is neither restricted nor recorded, and syscalls are not observed. Every receipt states this per dimension rather than implying more (ADR-07).
+- **Isolation is directory-level.** Commands run as the invoking user; the network is neither restricted nor recorded, and syscalls are not observed. Every receipt states this per dimension rather than implying more (ADR-08).
 - **Redundant changes make the choice arbitrary.** When either of two hunks would satisfy the proof on its own, exactly one survives minimisation. The number stays honest — one hunk really is enough — but which one is not meaningful.
 - **Overhead is real.** Attestation costs one run of your existing test command per claim, and the necessity search costs O(log n) more. Measured wall-clock overhead on Terminal-Bench 2.1: `[[OVERHEAD]]`.
 - **Executable bits are invisible on Windows.** A mode-only change is not observable there, and is recorded as such.
-- **The live model endpoint is the one untested edge.** The transport is exercised end to end against a real HTTP server — headers, tool results, error bodies, retries, a whole session — but this build was written without credentials for `api.anthropic.com`, so that last hop has been reasoned about rather than measured. `wrap` and `map`, which most people will use, involve no model at all.
+- **The live vendor endpoints are the one untested edge.** Both transports are exercised end to end against a real HTTP server — headers, tool results, error bodies, retries, a whole session each — but this build was written without credentials for any vendor, so that last hop has been reasoned about rather than measured. `wrap` and `map`, which most people will use, involve no model at all.
 - **Checked replay needs a reproducible environment.** A tool result that varies between identical runs surfaces as a divergence rather than passing silently (ADR-05). That is the intended direction of failure, but it does mean a suite with genuinely nondeterministic output cannot be strictly replayed — `freeze` is what pins such a run down.
 
 ## The Rewrite Rate study
