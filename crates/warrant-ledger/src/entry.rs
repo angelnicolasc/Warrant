@@ -60,6 +60,9 @@ pub enum EntryKind {
     RepoDiverged,
     /// A claim that failed, kept with its evidence so it is not re-attempted.
     Refutation,
+    /// A delta was cut down to the part its proof depends on, and the result
+    /// was re-run against that proof.
+    Trimmed,
     /// Free-form annotation from the operator.
     Note,
 }
@@ -86,6 +89,7 @@ impl EntryKind {
             EntryKind::RepoState => "repo_state",
             EntryKind::RepoDiverged => "repo_diverged",
             EntryKind::Refutation => "refutation",
+            EntryKind::Trimmed => "trimmed",
             EntryKind::Note => "note",
         }
     }

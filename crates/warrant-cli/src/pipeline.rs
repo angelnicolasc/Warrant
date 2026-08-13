@@ -55,6 +55,8 @@ pub struct MapResult {
     pub proof_source: String,
     /// Whether it came from the repository rather than the operator.
     pub proof_defaulted: bool,
+    /// The delta that was mapped, so a caller can act on the map's hunk ids.
+    pub diff: OverlayDiff,
 }
 
 /// Resolve the proof: the operator's if given, the repository's otherwise.
@@ -166,7 +168,144 @@ pub fn execute(
         ledger,
     )?;
 
-    Ok(MapResult { map, receipt, proof_source, proof_defaulted })
+    Ok(MapResult { map, receipt, proof_source, proof_defaulted, diff })
+}
+
+/// One file a trim would take work back out of.
+pub struct TrimmedFile {
+    /// Repo-relative path.
+    pub path: String,
+    /// Hunks the trim reverts.
+    pub dropped_hunks: usize,
+    /// Changed lines it takes back.
+    pub dropped_lines: u64,
+    /// Whether the file returns to exactly the state it started in.
+    pub fully_reverted: bool,
+}
+
+/// The result of trimming a delta down to what its proof depends on.
+///
+/// The interesting field is `verified`. The search established that the proof
+/// still holds with the load-bearing hunks alone, but it established that of
+/// the *minimal* set, and the confirmation pass may have dropped members of it
+/// afterwards. Rather than reason about whether those two sets coincide, a
+/// trim re-runs the proof on the tree it is actually proposing. One probe, and
+/// the claim stops being an inference.
+pub struct TrimPlan {
+    /// The tree with only the load-bearing hunks applied.
+    pub snapshot: Snapshot,
+    /// Whether the proof was re-run on that exact tree and held.
+    pub verified: bool,
+    /// Where the verified tree was materialised.
+    pub root: PathBuf,
+    /// Files the trim touches.
+    pub files: Vec<TrimmedFile>,
+    /// Changed lines the trim keeps.
+    pub kept_lines: u64,
+    /// Changed lines it takes back.
+    pub dropped_lines: u64,
+}
+
+impl TrimPlan {
+    /// Whether there is anything to take back.
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+}
+
+/// Build the tree the proof actually needs, and check that it still passes.
+///
+/// This is the one operation here that produces work rather than judging it:
+/// out of a delta the agent wrote, the subset the declared proof depends on,
+/// verified green on its own. What it removes is unproven, which is not the
+/// same as unwanted — a docstring, a log line or a feature with no test all
+/// land there — so nothing is written without being asked twice.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_trim(
+    root: &Path,
+    before: &Snapshot,
+    after: &Snapshot,
+    diff: &OverlayDiff,
+    map: &NecessityMap,
+    proof_source: &str,
+    blobs: Arc<dyn ContentStore>,
+    ledger: &Ledger,
+    timeout_ms: Option<u64>,
+) -> Result<TrimPlan> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let keep: BTreeSet<warrant_core::HunkId> = map.load_bearing.iter().copied().collect();
+    let snapshot = warrant_diff::apply_subset(before, after, diff, &keep, blobs.as_ref())?;
+
+    let mut by_path: BTreeMap<&str, TrimmedFile> = BTreeMap::new();
+    let mut kept_lines = 0;
+    let mut dropped_lines = 0;
+    for hunk in &diff.hunks {
+        if keep.contains(&hunk.id) {
+            kept_lines += hunk.changed_lines();
+            continue;
+        }
+        dropped_lines += hunk.changed_lines();
+        let entry = by_path.entry(hunk.path.as_str()).or_insert_with(|| TrimmedFile {
+            path: hunk.path.clone(),
+            dropped_hunks: 0,
+            dropped_lines: 0,
+            fully_reverted: false,
+        });
+        entry.dropped_hunks += 1;
+        entry.dropped_lines += hunk.changed_lines();
+    }
+    for (path, entry) in by_path.iter_mut() {
+        let total = diff.hunks.iter().filter(|h| h.path == *path).count();
+        entry.fully_reverted = entry.dropped_hunks == total;
+    }
+
+    // The trimmed tree gets its own cell, so proposing it never disturbs the
+    // tree the operator is standing in.
+    let trim_root = root.join(".warrant").join("trim").join(snapshot.root_hash().short());
+    std::fs::create_dir_all(&trim_root)
+        .with_context(|| format!("creating the trim cell at {}", trim_root.display()))?;
+    let scan = ScanOptions { use_parent_ignores: false, ..ScanOptions::default() };
+    let mut cell = WorkspaceCell::adopt(&trim_root, Arc::clone(&blobs), scan)?;
+    cell.restore(&snapshot)?;
+
+    let predicate = Predicate::compile(proof_source)
+        .with_context(|| format!("compiling the proof `{proof_source}`"))?;
+    let attestor = Attestor::new()?;
+    let shared: Arc<Mutex<dyn Cell>> = Arc::new(Mutex::new(cell));
+    let environment = Arc::new(warrant_attest::CellEnvironment::new(
+        Arc::clone(&shared),
+        before,
+        &snapshot,
+        timeout_ms,
+    ));
+    let verified = attestor.evaluate(
+        &predicate,
+        Arc::clone(&environment) as Arc<dyn warrant_attest::ProbeEnvironment>,
+    )?;
+    for record in environment.commands_run() {
+        ledger.append_json(EntryKind::Probe, &record, now_ms())?;
+    }
+    ledger.append_json(
+        EntryKind::Trimmed,
+        &serde_json::json!({
+            "from": diff.post_root,
+            "to": snapshot.root_hash(),
+            "verified": verified,
+            "kept_lines": kept_lines,
+            "dropped_lines": dropped_lines,
+        }),
+        now_ms(),
+    )?;
+
+    Ok(TrimPlan {
+        snapshot,
+        verified,
+        root: trim_root,
+        files: by_path.into_values().collect(),
+        kept_lines,
+        dropped_lines,
+    })
 }
 
 /// Sign a map into a receipt and record that it was issued.

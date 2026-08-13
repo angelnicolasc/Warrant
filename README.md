@@ -17,7 +17,7 @@
 
 # Warrant
 
-**Your agent says the tests pass. Warrant tells you whether the tests are why.**
+**Your agent wrote 400 lines. Warrant tells you which 40 you have to read.**
 
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 [![platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS%20%7C%20windows-6B7480)](#install)
@@ -27,37 +27,71 @@
 
 ---
 
+The bottleneck stopped being how fast an agent writes code. It is that somebody still has to read it — and a reviewer facing a green suite and four hundred changed lines has no way to tell which of them the green actually rests on.
+
+Warrant tells you, the only way it can be told: it reverts each hunk and re-runs the proof. Whatever you can take back without turning the suite red was never proven by it.
+
+```console
+$ warrant map --against HEAD
+
+  ⬒ read 8 of 10 changed lines  in 3 files
+  ✓ the other 2 are load-bearing: revert any one and the proof turns red
+    proof: exit(git diff --no-index --quiet src/config.txt tests/expected_config.txt) == 0
+
+  docs/notes.md               ░░░░░░░░░░  read 2 lines — unproven, revert-safe
+  src/pool.txt                ░░░░░░░░░░  read 2 lines — unproven, revert-safe
+  src/retry.txt               ░░░░░░░░░░  read 4 lines — unproven, revert-safe
+  src/config.txt              ██████████  proven
+```
+
+<sub>Verbatim tool output, no configuration. Both fixtures on this page are checked on every build by <code>crates/warrant-cli/tests/end_to_end.rs</code>, so the ground truth is known rather than asserted.</sub>
+
+That is a reading list. `src/config.txt` has the suite standing behind it — revert either of its lines and the run goes red. The other eight lines are dead work, or a silent behavioural change nothing is testing, and *those* are the ones worth your attention.
+
+Then take the dead work off:
+
+```console
+$ warrant trim --write
+
+  ✓ trimmed 8 of 10 changed lines, and the proof still holds
+  ⬒ verified on the trimmed tree itself, not inferred from the map
+
+  docs/notes.md               -2     reverted, 1 hunk
+  src/pool.txt                -2     reverted, 1 hunk
+  src/retry.txt               -4     reverted, 1 hunk
+```
+
+The trimmed tree is rebuilt from the load-bearing hunks and re-run against your suite before it is offered. What comes off is *unproven*, which is not the same as unwanted, so nothing is written until you ask twice.
+
+### The other thing the same mechanism finds
+
 Coding agents change the test to pass instead of changing the code to be correct. It has a name — the **rewrite failure mode** — and four ordinary shapes: gutted assertions, widened tolerances, added skips, regenerated snapshots. The suite goes green. The bug ships anyway.
 
 Every tool that addresses this today is a proxy for suspicion. *Read the test diff first. Track assertion counts. Flag added skips.* All of them tell you a test **changed**. None tells you whether that change is **why the suite went green**.
 
-Warrant answers that question the only way it can be answered: it reverts the change and re-runs.
+Reverting and re-running answers it directly, and costs nothing extra — it is the same probe:
 
 ```console
-$ warrant wrap claude-code -- "fix the failing timeout test"
+  ⬒ read 8 of 10 changed lines  in 3 files
+  ✓ the other 2 are load-bearing: revert any one and the proof turns red
 
-  agent says            done ✓
-  ✓ claim discharged        proof: exit(cargo test) == 0 (default)
-  ⬒ proof coverage  33%     1 of 3 hunks load-bearing
-
-  docs/notes.md               ░░░░░░░░░░  unproven — revert-safe
-  src/lib.rs                  ░░░░░░░░░░  unproven — revert-safe
-  tests/config.rs             ██████████  ⚠ load-bearing test edit
+  docs/notes.md               ░░░░░░░░░░  read 2 lines — unproven, revert-safe
+  src/pool.txt                ░░░░░░░░░░  read 2 lines — unproven, revert-safe
+  src/retry.txt               ░░░░░░░░░░  read 4 lines — unproven, revert-safe
+  tests/expected_config.txt   ██████████  ⚠ load-bearing test edit
                               └ reverting it makes the proof fail
                                 the change that made it pass was the change to the test
 ```
 
-<sub>Verbatim tool output. Nothing was configured: `cargo test` was detected from `Cargo.toml`. The agent in that run is a script that performs the failure mode deliberately, so the ground truth is known — it is checked on every build by <code>crates/warrant-cli/tests/end_to_end.rs</code>.</sub>
-
-Two lines carry the review. `src/lib.rs` reverts without breaking anything the proof checks — dead work, or a silent behavioural change nothing is testing. And a hunk *inside the test file* is load-bearing, meaning part of why this passes is that the agent edited the test.
-
-Both take one glance. Both otherwise take a careful reviewer twenty minutes.
+Same repository, same green suite, same headline number, same three files of scope creep. One row differs. `warrant map --strict` exits 2 on it, which is what a merge gate needs.
 
 ## What this is
 
 A tool that makes **your current agent** legible. It does not ask you to switch harnesses, learn a language, or write a specification. Point it at the agent you already run and it produces a per-hunk proof map and one number.
 
 It is not a verifier. There is no silver bullet for coding-agent verification ([arXiv 2606.26300](https://arxiv.org/pdf/2606.26300)), and the sound approach is to layer imperfect methods and report honestly what each one covers. **Warrant reports coverage, never correctness** — and the distinction is load-bearing enough that every receipt it issues states it in writing.
+
+Read the direction of the claim carefully, because it is the whole design. *Proven* means the declared proof depends on it, not that it is right — necessity is not sufficiency. *Unproven* means the suite says nothing about it, not that it is wrong. What Warrant can state without qualification is which part of a diff has a test behind it, and that is exactly what it prints.
 
 ## Install
 
@@ -107,7 +141,7 @@ flowchart LR
     A["<b>declare</b><br/><sub>proof sealed<br/>before any work</sub>"] --> B["<b>act</b><br/><sub>agent works<br/>in an isolated cell</sub>"]
     B --> C["<b>attest</b><br/><sub>sealed checker<br/>returns one bit</sub>"]
     C --> D["<b>map</b><br/><sub>revert each hunk,<br/>re-run the proof</sub>"]
-    D --> E["<b>proof coverage</b><br/><sub>which lines are<br/>load-bearing</sub>"]
+    D --> E["<b>reading list</b><br/><sub>which lines have<br/>nothing behind them</sub>"]
 
     style A fill:#F3EADA,stroke:#9A6B1F,color:#1A1D22
     style C fill:#F3EADA,stroke:#9A6B1F,color:#1A1D22
@@ -138,9 +172,23 @@ flowchart TD
     style L fill:#E4EFE9,stroke:#2D6A4F,color:#1A1D22
 ```
 
-**Warrant does not detect weak proofs. It makes their weakness legible.** A vacuous proof renders as *0 of 47 hunks proven*. The number cannot be inflated without the work genuinely being necessary — which is what makes it worth reading.
+**Warrant does not detect weak proofs. It makes their weakness legible.** A vacuous proof renders as *read 470 of 470 changed lines*. The number cannot be moved without the work genuinely being necessary — which is what makes it worth reading.
 
 Grading proof strength with a second model would reintroduce the exact unreliable-judge failure this design exists to avoid. Measuring it does not.
+
+### What it costs
+
+A probe is one run of your suite, so probe count is the overhead. The search is logarithmic in the size of the diff and the fixed cost dominates — measured on this build, three hunks cost six probes and sixty-six cost ten.
+
+What you actually wait on is *rounds*, not probes: candidates at the same level of the search are independent, so given a pool of cells they run at once. Four cells against one, on a fixture whose proof carries a two-second floor:
+
+| hunks | probes 1 → 4 | rounds 1 → 4 | wall clock 1 → 4 |
+|---|---|---|---|
+| 6  | 6 → 8   | 6 → 4  | 13.3 s → 9.1 s  (−31%) |
+| 18 | 8 → 12  | 8 → 6  | 17.5 s → 13.6 s (−22%) |
+| 66 | 10 → 16 | 10 → 8 | 22.2 s → 18.3 s (−17%) |
+
+The trade is a third more compute for a fifth to a third less time. On a suite that runs in milliseconds it inverts and the pool loses to its own setup, which is what `--jobs 1` is for.
 
 ## Commands
 
@@ -148,6 +196,7 @@ Grading proof strength with a second model would reintroduce the exact unreliabl
 |---|---|
 | `warrant wrap <agent> -- <task>` | Run an agent inside a cell and map what it changed |
 | `warrant map --against <ref>` | Map changes already in the working tree |
+| `warrant trim [--write]` | Cut the change down to what the proof depends on, verified |
 | `warrant proof [expr]` | Compile a proof and show exactly what it will run |
 | `warrant log [--verify\|--diverged]` | Read the record; check the chain; detect a rewritten history |
 | `warrant verify <receipt>` | Check a receipt someone else produced |
@@ -203,13 +252,14 @@ export OPENAI_API_KEY=…     && warrant run "…" --provider openai --base-url 
 
 ## How this is checked
 
-A tool whose thesis is that unverified assertions should not be trusted has to hold itself to it. `cargo test --workspace` runs **390 tests**, and the ones that matter are not unit tests:
+A tool whose thesis is that unverified assertions should not be trusted has to hold itself to it. `cargo test --workspace` runs **403 tests**, and the ones that matter are not unit tests:
 
 | | |
 |---|---|
 | **Five property tests, 400 cases each** | Random file trees, random subsets. Applying nothing must reproduce the pre-state byte for byte; applying everything must reproduce the post-state byte for byte. Everything downstream is meaningless without those two. |
 | **Three `compile_fail` tests** | The type-system invariants (ADR-01, and *no `Delta` from model output*) are compiled by `cargo test`, and the suite fails if any of them ever starts compiling. |
-| **Ten end-to-end tests** | The real binary, on real repositories, with a real command as the proof — including the case on the front page, the honest fix it must *not* flag, and a rewritten git history it must detect. |
+| **Twelve end-to-end tests** | The real binary, on real repositories, with a real command as the proof — including both cases on the front page, the honest fix it must *not* flag, a trim that takes work off and re-runs the suite on what is left, and a rewritten git history it must detect. |
+| **The pool changes the schedule, never the map** | The same scenario is mapped at width 1 and width 4 and the two maps are compared whole, with only the two cost fields normalised away — so a field added later is compared too, rather than silently skipped. |
 | **A tamper suite that bypasses the API** | Entries removed, relabelled, resealed and edited on disk, plus the one attack a hash chain cannot see on its own (ADR-03). |
 | **Both model transports against a real socket** | Headers, body shape, tool results, every stop reason, error bodies, and which failures may be retried with an identical request — driven through a real HTTP server, for chat completions *and* Anthropic Messages, including a whole session end to end on each. |
 | **Round trips through the record alone** | A session replays from its ledger with every request digest checked; a frozen run reproduces in a world that shares no store, no ledger and no directory with the original. |
@@ -360,6 +410,21 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 
 </details>
 
+<details>
+<summary><b>ADR-11 — A trim is re-run, not inferred</b> · <i>implemented</i></summary>
+
+<br>
+
+**Decision.** `warrant trim` rebuilds the tree from the load-bearing hunks alone and re-runs the proof on that exact tree before offering it. One extra probe, always.
+
+**Evidence.** The search establishes that the proof holds with the *minimal* set applied — that is delta debugging's postcondition, and it is backed by a probe that actually ran. But the confirmation pass may then drop members of that set as monotonicity violations, and dropping several one at a time does not establish that removing them together still passes. The set a trim proposes and the set that was probed are therefore not always the same set.
+
+**Rejected.** Deriving the trim's validity from the map. It is one suite run to turn an inference into a measurement, on an operation whose entire value is that you can act on it without reading the diff.
+
+**Consequence.** A trim that does not hold is refused rather than offered, and says why: the load-bearing hunks are jointly necessary but not jointly sufficient, so the change relies on something the search could not isolate. Nothing is written to the working tree without `--write`, because unproven is not the same as unwanted — a docstring, a log line, or a feature with no test all land there.
+
+</details>
+
 ## Stack
 
 | Layer | Choice | Rationale |
@@ -372,7 +437,7 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 | **Model transport** | `ureq` — blocking HTTP, two wire formats | A session makes one model call at a time and the workload is probe-bound, so an async runtime would buy nothing while appearing on every error path |
 | **Surface** | `clap`, one static binary | `cargo install` and nothing else — a real distribution advantage over every TypeScript competitor |
 
-**No async runtime.** The workload is probe-bound rather than IO-bound: a probe is a snapshot restore followed by a process that runs for seconds, and probes within one search are sequential because they share a cell. Adding an executor would have bought nothing and cost a dependency on every error path.
+**No async runtime.** The workload is probe-bound rather than IO-bound: a probe is a snapshot restore followed by a process that runs for seconds. Where probes do run concurrently they run in separate cells on scoped OS threads, because a probe rewrites the filesystem and concurrency needs separate trees rather than separate tasks. An executor would have bought nothing there and cost a dependency on every error path.
 
 **Why Rust rather than Go.** Not a general claim about the languages — for a different harness Go wins on a deeper container-runtime ecosystem, best-in-class eBPF tooling, and a larger infrastructure contributor pool. It loses here for one specific reason: **this workload is probe-bound.** Delta debugging issues O(log n) snapshot-restore-and-execute cycles per claim, and parallel adjudication multiplies that again. The two operations in that inner loop are filesystem snapshotting and WebAssembly execution, and the state of the art in both ships as Rust crates that embed in-process. Choosing Go means reimplementing them or paying IPC on the hottest path in the system.
 
@@ -386,7 +451,7 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 
 ## Limitations
 
-- **Flaky and order-dependent tests degrade the map.** Delta debugging assumes a stable proof. Warrant evaluates the proof twice on the agent's result before mapping anything, and reports a proof that disagrees with itself as *unstable* rather than producing a map from contradictory probes. A suite that is flaky at lower rates will still produce a noisier map, and hunks the confirmation pass had to drop are reported as monotonicity violations rather than hidden.
+- **Flaky and order-dependent tests degrade the map.** Delta debugging assumes a stable proof. The confirmation pass reports hunks it had to drop as monotonicity violations rather than hiding them, which is how a flaky suite surfaces on an ordinary run. An explicit second satisfaction probe — a whole extra suite run, and on a small map a sixth of the total cost — is available for when you want the instability named up front as *unstable* rather than inferred from the violations afterwards.
 - **Refactors and formatting changes read as unproven.** They usually are, relative to a behavioural proof. There is no AST-equivalence pass in this release, so a pure rename shows up in the unproven region alongside genuinely dead work.
 - **Isolation is directory-level.** Commands run as the invoking user; the network is neither restricted nor recorded, and syscalls are not observed. Every receipt states this per dimension rather than implying more (ADR-08).
 - **Redundant changes make the choice arbitrary.** When either of two hunks would satisfy the proof on its own, exactly one survives minimisation. The number stays honest — one hunk really is enough — but which one is not meaningful.

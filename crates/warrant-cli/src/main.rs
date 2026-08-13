@@ -73,6 +73,26 @@ enum Command {
         mapping: MappingOptions,
     },
 
+    /// Cut the change down to the part the proof depends on, verified.
+    ///
+    /// Maps first, then rebuilds the tree from the load-bearing hunks alone
+    /// and re-runs the proof on it. What comes off is unproven, which is not
+    /// the same as unwanted — a comment, a log line or a feature with no test
+    /// all live there — so this shows the plan and writes nothing unless you
+    /// pass --write.
+    Trim {
+        /// What to compare against.
+        #[arg(long, default_value = "HEAD", value_name = "REF")]
+        against: String,
+
+        /// Put the trimmed tree into the working directory.
+        #[arg(long)]
+        write: bool,
+
+        #[command(flatten)]
+        mapping: MappingOptions,
+    },
+
     /// Drive a model against this repository, under a claim it declares itself.
     ///
     /// Works with any provider: a local server, or any hosted endpoint on the
@@ -242,6 +262,9 @@ fn run() -> Result<ExitCode> {
             cmd_wrap(&root, &harness, &args, &mapping, &glyphs)
         }
         Command::Map { against, mapping } => cmd_map(&root, &against, &mapping, &glyphs),
+        Command::Trim { against, write, mapping } => {
+            cmd_trim(&root, &against, write, &mapping, &glyphs)
+        }
         Command::Run { task, agent, receipt, strict } => {
             agentic::run(&root, &task, &agent, receipt.as_deref(), strict, &glyphs)
         }
@@ -341,28 +364,27 @@ fn cmd_wrap(
     report(&outcome, options, glyphs)
 }
 
-fn cmd_map(
+/// The two states `map` and `trim` both work from.
+struct Endpoints {
+    before: Snapshot,
+    after: Snapshot,
+    isolation: warrant_cell::IsolationReport,
+}
+
+/// Check out a reference and observe both ends of the change.
+fn endpoints(
     root: &std::path::Path,
     against: &str,
-    options: &MappingOptions,
-    glyphs: &Glyphs,
-) -> Result<ExitCode> {
+    command: &str,
+    blobs: &Arc<dyn warrant_diff::ContentStore>,
+) -> Result<Endpoints> {
     if !repo::is_git_repo(root) {
         bail!(
-            "`warrant map` compares the working tree against a git reference, and {} is not a \
-             git repository.\nUse `warrant wrap` to map an agent run instead.",
+            "`warrant {command}` compares the working tree against a git reference, and {} is not \
+             a git repository.\nUse `warrant wrap` to map an agent run instead.",
             root.display()
         );
     }
-
-    let ledger = Ledger::open_for_repo(root)?;
-    let blobs = open_blobs(&ledger)?;
-    ledger.append_json(
-        EntryKind::RunStarted,
-        &serde_json::json!({ "mode": "map", "against": against }),
-        now_ms(),
-    )?;
-    record_git_state(&ledger, root, "start")?;
 
     // A detached worktree is the cheapest exact checkout of a reference that
     // does not disturb the tree the operator is standing in.
@@ -385,7 +407,26 @@ fn cmd_map(
     // The working tree was not produced under any Warrant cell, so the
     // receipt reports the isolation the probes ran under and says nothing
     // about how the change itself was made.
-    let isolation = WorkspaceCell::adopt(root, Arc::clone(&blobs), scan)?.isolation();
+    let isolation = WorkspaceCell::adopt(root, Arc::clone(blobs), scan)?.isolation();
+    Ok(Endpoints { before, after, isolation })
+}
+
+fn cmd_map(
+    root: &std::path::Path,
+    against: &str,
+    options: &MappingOptions,
+    glyphs: &Glyphs,
+) -> Result<ExitCode> {
+    let ledger = Ledger::open_for_repo(root)?;
+    let blobs = open_blobs(&ledger)?;
+    let Endpoints { before, after, isolation } = endpoints(root, against, "map", &blobs)?;
+
+    ledger.append_json(
+        EntryKind::RunStarted,
+        &serde_json::json!({ "mode": "map", "against": against }),
+        now_ms(),
+    )?;
+    record_git_state(&ledger, root, "start")?;
 
     let request = MapRequest {
         root: root.to_path_buf(),
@@ -408,6 +449,88 @@ fn cmd_map(
         now_ms(),
     )?;
     report(&outcome, options, glyphs)
+}
+
+fn cmd_trim(
+    root: &std::path::Path,
+    against: &str,
+    write: bool,
+    options: &MappingOptions,
+    glyphs: &Glyphs,
+) -> Result<ExitCode> {
+    let ledger = Ledger::open_for_repo(root)?;
+    let blobs = open_blobs(&ledger)?;
+    let Endpoints { before, after, isolation } = endpoints(root, against, "trim", &blobs)?;
+
+    ledger.append_json(
+        EntryKind::RunStarted,
+        &serde_json::json!({ "mode": "trim", "against": against, "write": write }),
+        now_ms(),
+    )?;
+    record_git_state(&ledger, root, "start")?;
+
+    let request = MapRequest {
+        root: root.to_path_buf(),
+        before: before.clone(),
+        after: after.clone(),
+        proof: options.proof.clone(),
+        max_probes: options.max_probes,
+        parallelism: options.jobs,
+        timeout_ms: options.timeout.map(|s| s * 1000),
+        task: Some(format!("trim against {against}")),
+        harness: None,
+        isolation,
+    };
+
+    println!();
+    let outcome = execute(request, &ledger, blobs.clone())?;
+    print!("{}", render_map(&outcome.map, &outcome.proof_source, outcome.proof_defaulted, glyphs));
+
+    // A trim only means anything on a map that means anything. Everything else
+    // — an unsatisfied proof, a vacuous one, a flaky suite — is a reason to
+    // look at the proof rather than at the diff.
+    if outcome.map.outcome != MapOutcome::Mapped {
+        println!();
+        println!("  nothing to trim: {}", outcome.map.outcome.describe());
+        return Ok(ExitCode::from(2));
+    }
+
+    let plan = pipeline::plan_trim(
+        root,
+        &before,
+        &after,
+        &outcome.diff,
+        &outcome.map,
+        &outcome.proof_source,
+        Arc::clone(&blobs),
+        &ledger,
+        options.timeout.map(|s| s * 1000),
+    )?;
+
+    println!();
+    print!("{}", render::render_trim(&plan, write, glyphs));
+
+    if plan.is_empty() {
+        return Ok(ExitCode::SUCCESS);
+    }
+    if !plan.verified {
+        return Ok(ExitCode::from(2));
+    }
+
+    if write {
+        let scan = ScanOptions::default();
+        let mut cell = WorkspaceCell::adopt(root, Arc::clone(&blobs), scan)?;
+        cell.restore(&plan.snapshot)?;
+        ledger.append_json(EntryKind::CellSnapshot, &plan.snapshot, now_ms())?;
+        println!("  working tree is now the trimmed tree");
+    }
+
+    ledger.append_json(
+        EntryKind::RunFinished,
+        &serde_json::json!({ "outcome": "trimmed", "written": write }),
+        now_ms(),
+    )?;
+    Ok(ExitCode::SUCCESS)
 }
 
 fn cmd_proof(root: &std::path::Path, expression: Option<&str>) -> Result<ExitCode> {

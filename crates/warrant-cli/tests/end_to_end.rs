@@ -106,7 +106,7 @@ fn a_laundered_green_is_flagged_and_fails_a_strict_run() {
     let output = wrap_agent(repo.path(), "laundered", &TEST_FILES, &["--strict"]);
     let text = stdout(&output);
 
-    assert!(text.contains("claim discharged"), "the suite must be green:\n{text}");
+    assert!(text.contains("are load-bearing"), "the suite must be green:\n{text}");
     assert!(
         text.contains("tests/expected_config.txt"),
         "the test file must appear in the map:\n{text}"
@@ -130,7 +130,7 @@ fn an_honest_fix_passes_a_strict_run() {
     let output = wrap_agent(repo.path(), "honest", &CHANGED_FILES, &["--strict"]);
     let text = stdout(&output);
 
-    assert!(text.contains("claim discharged"), "the suite must be green:\n{text}");
+    assert!(text.contains("are load-bearing"), "the suite must be green:\n{text}");
     assert!(!text.contains("load-bearing test edit"), "nothing should be flagged:\n{text}");
     assert!(text.contains("src/config.txt"), "the fix must be visible in the map:\n{text}");
     assert!(text.contains("unproven"), "the scope creep must be reported as revert-safe:\n{text}");
@@ -150,12 +150,69 @@ fn the_two_outcomes_differ_only_in_the_map() {
     // Indistinguishable on everything a reviewer normally sees.
     for text in [&a, &b] {
         assert!(text.contains("agent says            done"), "{text}");
-        assert!(text.contains("claim discharged"), "{text}");
-        assert!(text.contains("1 of 3 hunks load-bearing"), "{text}");
+        assert!(text.contains("read 4 of 6 changed lines"), "{text}");
+        assert!(text.contains("the other 2 are load-bearing"), "{text}");
     }
     // Separated cleanly by the one thing that reverts and re-runs.
     assert!(a.contains("load-bearing test edit"));
     assert!(!b.contains("load-bearing test edit"));
+}
+
+/// Put the honest fix and its scope creep into the working tree, then ask for
+/// the part the proof depends on. Two files come back off, the config fix
+/// stays, and the trimmed tree is re-run rather than merely inferred.
+#[test]
+fn trim_takes_back_the_unproven_work_and_re_runs_the_proof() {
+    let repo = fixture();
+    git(repo.path(), &["checkout", "--quiet", "honest", "--", "."]);
+
+    let dry = run_warrant(repo.path(), &["trim", "--proof", PROOF, "--ascii"]);
+    let text = stdout(&dry);
+
+    assert!(text.contains("and the proof still holds"), "{text}");
+    assert!(text.contains("nothing was written"), "a dry run must say so:\n{text}");
+
+    // Only the list of what comes off, so the map above it does not count.
+    let plan = &text[text.find("and the proof still holds").unwrap()..];
+    assert!(plan.contains("docs/notes.md"), "the unproven work must be listed:\n{plan}");
+    assert!(plan.contains("src/handler.txt"), "{plan}");
+    assert!(!plan.contains("src/config.txt  "), "the fix must not be trimmed:\n{plan}");
+    assert_eq!(dry.status.code(), Some(0));
+
+    // A dry run is a dry run.
+    let handler = std::fs::read_to_string(repo.path().join("src").join("handler.txt")).unwrap();
+    assert_eq!(handler, "retries = 5\n", "the working tree must be untouched");
+
+    let written = run_warrant(repo.path(), &["trim", "--proof", PROOF, "--ascii", "--write"]);
+    assert_eq!(written.status.code(), Some(0), "{}", stdout(&written));
+    assert!(stdout(&written).contains("working tree is now the trimmed tree"));
+
+    // The scope creep is back to its committed state; the fix survives.
+    let handler = std::fs::read_to_string(repo.path().join("src").join("handler.txt")).unwrap();
+    assert_eq!(handler, "retries = 3\n", "unproven work should have come off");
+    let config = std::fs::read_to_string(repo.path().join("src").join("config.txt")).unwrap();
+    assert_eq!(config, "timeout = 30\n", "the load-bearing fix must survive");
+
+    // And the suite the proof stands on is still green on what is left.
+    let after = run_warrant(repo.path(), &["map", "--proof", PROOF, "--ascii"]);
+    assert!(stdout(&after).contains("read 0 of 2 changed lines"), "{}", stdout(&after));
+}
+
+/// Trimming a laundered green would leave the test edit standing, which is the
+/// one thing a person must not have hidden from them. The map runs first, and
+/// its finding is on screen before any trim is offered.
+#[test]
+fn trimming_a_laundered_green_still_shows_the_tampering() {
+    let repo = fixture();
+    git(repo.path(), &["checkout", "--quiet", "laundered", "--", "."]);
+
+    let output = run_warrant(repo.path(), &["trim", "--proof", PROOF, "--ascii"]);
+    let text = stdout(&output);
+    assert!(text.contains("load-bearing test edit"), "{text}");
+    assert!(
+        text.find("load-bearing test edit").unwrap() < text.find("trimmed").unwrap_or(usize::MAX),
+        "the finding must come before the offer:\n{text}"
+    );
 }
 
 #[test]
