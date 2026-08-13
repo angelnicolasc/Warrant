@@ -318,10 +318,13 @@ fn a_pool_of_cells_changes_the_schedule_and_never_the_map() {
         edits.push((path, "rewritten\n"));
     }
 
+    // Both widths are stated rather than defaulted. `default_parallelism` is
+    // read off the machine and yields 1 on a two-core runner, which would make
+    // this a test that passes or fails by accident of hardware.
     let (sequential, _) =
         map_scenario_with_cells(&before, &edits, NecessityConfig::default().sequential(), 1);
     let (concurrent, diff) =
-        map_scenario_with_cells(&before, &edits, NecessityConfig::default(), 4);
+        map_scenario_with_cells(&before, &edits, NecessityConfig::default().with_parallelism(4), 4);
 
     assert_eq!(sequential.outcome, MapOutcome::Mapped);
     assert_eq!(load_bearing_paths(&concurrent, &diff), ["src/config.txt"]);

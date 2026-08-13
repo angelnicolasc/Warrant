@@ -127,6 +127,16 @@ impl NecessityConfig {
         self
     }
 
+    /// Evaluate up to `width` candidates at a time.
+    ///
+    /// Still capped by the number of cells the caller supplies. Worth setting
+    /// explicitly wherever the width is the thing under test: the default is
+    /// read off the machine, and a machine with two cores yields one.
+    pub fn with_parallelism(mut self, width: usize) -> Self {
+        self.parallelism = width.max(1);
+        self
+    }
+
     /// Build the matcher for test and snapshot paths.
     pub fn path_classifier(&self) -> Result<PathClassifier> {
         Ok(PathClassifier {
