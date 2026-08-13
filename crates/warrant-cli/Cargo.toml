@@ -12,6 +12,18 @@ authors.workspace = true
 name = "warrant"
 path = "src/main.rs"
 
+# Where `cargo binstall warrant-cli` should look, which is where `dist` puts
+# things. Without this it guesses, and a guess that misses falls back to
+# building from source — the slow path, silently, which is the one outcome
+# binstall exists to avoid.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.{ archive-format }"
+pkg-fmt = "txz"
+bin-dir = "{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 [dependencies]
 warrant-agent.workspace = true
 warrant-attest.workspace = true

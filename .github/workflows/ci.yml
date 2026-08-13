@@ -252,6 +252,82 @@ jobs:
           grep -q 'load-bearing test edit' "$MARKDOWN" \
             || { echo 'the comment does not name the finding' >&2; exit 1; }
 
+  # The job above installs the build under test and the action finds it
+  # already there, which is the right thing for reviewing a commit and leaves
+  # the download untested. This one starts with nothing and makes the action
+  # fetch a real release, verify its checksum and unpack it.
+  action-download:
+    name: the action, fetching its own release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: warrant-src
+
+      # Whatever has most recently shipped, rather than a tag written down
+      # here that goes stale. Before the first release there is nothing to
+      # fetch and the rest of the job stands down rather than failing.
+      - name: The most recent release
+        id: latest
+        working-directory: warrant-src
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [ -z "$tag" ]; then echo 'No release yet; nothing to fetch.'; fi
+
+      - name: Build a repository with a known answer
+        if: steps.latest.outputs.tag != ''
+        run: |
+          set -euo pipefail
+          git config --global user.name fixture
+          git config --global user.email fixture@example.invalid
+          git config --global init.defaultBranch main
+          git config --global core.autocrlf false
+
+          git init --quiet .
+          printf 'warrant-src/\n.warrant/\nwarrant-map.*\n' > .gitignore
+          mkdir -p src tests docs
+          printf 'timeout = 99\n' > src/config.txt
+          printf 'timeout = 30\n' > tests/expected_config.txt
+          printf '# Notes\n'      > docs/notes.md
+          git add -A
+          git commit --quiet -m 'the suite is red'
+          echo "BASE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+          printf 'timeout = 30\n' > src/config.txt
+          printf '# Notes\n\nCorrected the timeout.\n' > docs/notes.md
+
+      - name: Map it with a downloaded Warrant
+        id: fetched
+        if: steps.latest.outputs.tag != ''
+        uses: ./warrant-src
+        with:
+          version: ${{ steps.latest.outputs.tag }}
+          against: ${{ env.BASE }}
+          proof: "exit(git diff --no-index --quiet src/config.txt tests/expected_config.txt) == 0"
+          comment: false
+
+      - name: It fetched the release it said it did
+        if: steps.latest.outputs.tag != ''
+        env:
+          TAG: ${{ steps.latest.outputs.tag }}
+          REPORTED: ${{ steps.fetched.outputs.version }}
+          OUTCOME: ${{ steps.fetched.outputs.outcome }}
+        run: |
+          set -euo pipefail
+          test "$REPORTED" = "$TAG" || { echo "asked for $TAG, ran $REPORTED" >&2; exit 1; }
+
+          # The binary is the one the tag names, whether it arrived by
+          # download or out of the cache. Either route has to land the same
+          # thing, and this is the only assertion that catches it if not.
+          installed=$(warrant --version | awk '{print $NF}')
+          test "v$installed" = "$TAG" || { echo "$TAG installed a binary reporting $installed" >&2; exit 1; }
+
+          test "$OUTCOME" = mapped || { echo "expected a mapped run, got $OUTCOME" >&2; exit 1; }
+
   release-build:
     name: release build
     runs-on: ubuntu-latest
