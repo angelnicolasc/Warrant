@@ -115,12 +115,14 @@ cargo install warrant-cli      # from source; the binary is still called `warran
 cargo binstall warrant-cli     # the released binary, no build
 ```
 
-Piping a script into a shell is a reasonable thing to be unwilling to do, and this is a project about not taking claims on faith. Every archive ships beside its SHA-256, and every release carries [build provenance](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds) — so you can download the artefact and check that it came from this repository, built by this workflow, before anything runs:
+Piping a script into a shell is a reasonable thing to be unwilling to do, and this is a project about not taking claims on faith. Every archive ships beside its SHA-256, so you can fetch it, check it, and only then run anything:
 
 ```bash
 gh release download v0.1.0 --repo angelnicolasc/warrant --pattern '*x86_64-unknown-linux-musl*'
-gh attestation verify warrant-cli-x86_64-unknown-linux-musl.tar.xz --repo angelnicolasc/warrant
+sha256sum -c warrant-cli-x86_64-unknown-linux-musl.tar.xz.sha256
 ```
+
+Public releases also carry [build provenance](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds), so `gh attestation verify <archive> --repo angelnicolasc/warrant` will tell you it was built by this workflow from this repository — see ADR-12 for why that is not on every release here yet.
 
 The x86-64 Linux build links against musl, so it is genuinely static and runs unchanged inside whatever container you put it in. Building from source needs Rust 1.94 or newer, which is a floor set by `cranelift` arriving through `wasmtime`, not by this workspace.
 
@@ -508,6 +510,8 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 **Rationale.** A generated workflow sits oddly in a repository where every line is meant to be deliberate. It earns its place because release engineering is the one path that otherwise runs for the first time when it matters most — on a tag, with an audience — and because what it brings is not convenience: checksums beside every archive, and [build provenance](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds) generated in the workflow that did the building. A project whose entire argument is that claims should carry evidence cannot ship binaries that carry none.
 
 **Every target is built on its own architecture.** arm64 runners have been generally available for public repositories since [August 2025](https://github.blog/changelog/2025-08-07-arm64-hosted-runners-for-public-repositories-are-now-generally-available/) and private ones since [January 2026](https://github.blog/changelog/2026-01-29-arm64-standard-runners-are-now-available-in-private-repositories/), so nothing here is cross-compiled and hoped for. The x86-64 Linux build targets musl, which needs `musl-tools` on the runner — `blake3` compiles SIMD through `cc`, and without it that one leg of the matrix fails at link time and nowhere else.
+
+**Attestations are off, and not by choice.** The first tagged build made the point precisely: all six targets compiled, and all six then failed with *"Feature not available for user-owned private repositories."* Artifact Attestations require a public repository, so provenance arrives with publication and is a one-line change in `dist-workspace.toml` when it does. Until then the SHA-256 beside each archive is what a download can be checked against. Recorded here rather than quietly toggled, because a config that reads `false` next to a README paragraph about provenance is exactly the kind of drift this project is meant to notice.
 
 **Rejected.** Hand-rolling the matrix, which is the same work with a smaller test surface. Publishing under the name `warrant` on crates.io, which has been taken since 2024 — the crate is `warrant-cli` and the binary it installs is `warrant`.
 
