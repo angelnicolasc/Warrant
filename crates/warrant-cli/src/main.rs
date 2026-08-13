@@ -75,8 +75,11 @@ enum Command {
 
     /// Drive a model against this repository, under a claim it declares itself.
     ///
-    /// Needs ANTHROPIC_API_KEY. `warrant wrap` does not, and works with the
-    /// agent you already have configured.
+    /// Works with any provider: a local server, or any hosted endpoint on the
+    /// OpenAI chat-completions format or Anthropic Messages. See --provider.
+    ///
+    /// `warrant wrap` needs no model at all and works with the agent you
+    /// already have configured.
     Run {
         /// What to do.
         task: String,

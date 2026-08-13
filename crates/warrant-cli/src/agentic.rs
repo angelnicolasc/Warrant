@@ -45,7 +45,10 @@ pub enum Wire {
 /// Options shared by the commands that drive a model.
 #[derive(clap::Args, Clone, Debug)]
 pub struct AgentOptions {
-    /// Which API to talk to. Defaults to whichever key is set.
+    /// Which API to talk to.
+    ///
+    /// `auto` uses whichever key is set, checking OPENAI_API_KEY before
+    /// ANTHROPIC_API_KEY. Pass this explicitly when both are.
     #[arg(long, value_enum, default_value_t = Wire::Auto)]
     pub provider: Wire,
 
@@ -105,17 +108,26 @@ impl AgentOptions {
         if self.provider != Wire::Auto {
             return Ok(self.provider);
         }
-        if std::env::var(warrant_agent::anthropic::API_KEY_VAR).is_ok() {
-            return Ok(Wire::Anthropic);
-        }
+        // A fixed order, documented on the flag rather than left as a
+        // surprise. The broadly compatible format goes first because it is
+        // the one that also covers a server running on this machine.
         if std::env::var(warrant_agent::openai::API_KEY_VAR).is_ok() {
             return Ok(Wire::Openai);
         }
+        if std::env::var(warrant_agent::anthropic::API_KEY_VAR).is_ok() {
+            return Ok(Wire::Anthropic);
+        }
         bail!(
-            "no model credentials found. Set ANTHROPIC_API_KEY, or OPENAI_API_KEY together with \
-             --provider openai|deepseek|local (any endpoint speaking chat completions works, \
-             including one running on this machine).\n\
-             `warrant wrap` and `warrant map` need no model at all."
+            "no model credentials found. Warrant is not tied to a vendor — any of these works:\n\
+             \n    \
+             --provider local --base-url http://localhost:11434 --model <id>   (no key needed)\n    \
+             DEEPSEEK_API_KEY=…    --provider deepseek\n    \
+             OPENAI_API_KEY=…      --provider openai        (also Groq, Together, OpenRouter, … \
+             with --base-url)\n    \
+             ANTHROPIC_API_KEY=…   --provider anthropic\n\
+             \n\
+             `warrant wrap` and `warrant map` need no model at all, and are the commands that \
+             produce the proof map."
         )
     }
 

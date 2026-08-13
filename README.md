@@ -78,6 +78,8 @@ warrant wrap codex       -- "migrate auth to JWT"
 warrant wrap opencode    -- "fix the failing integration tests"
 ```
 
+Any of them, or none of them: `wrap` runs whatever command you give it and observes what it left behind, so it has no opinion about which agent — or which model behind it — you use.
+
 **The default proof is your repository's existing test command.** Warrant finds it the way you would — `Cargo.toml`, `go.mod`, `pytest.ini`, a `test` script in `package.json`, a `test:` target in a `Makefile`. You write nothing and declare nothing.
 
 Custom proofs are an optimisation for tighter claims, never a requirement:
@@ -178,16 +180,26 @@ warrant do "migrate auth to JWT" --attempts 5 \
 
 Five agents and five diffs is five times the review. Five agents and one proven answer is less review than one agent, because the branches that could not discharge the claim never reach a person.
 
-**Any model, including one on your own machine.** Two wire formats cover the field, and `--provider` picks between them:
+### Any model, including one on your own machine
+
+Warrant is not tied to a vendor. `Provider` is a trait with two implementations, and between them they reach everything: the OpenAI chat-completions format — which OpenAI, DeepSeek, Groq, Together, Fireworks and OpenRouter all speak, along with anything you host yourself — and Anthropic Messages.
 
 ```bash
-export ANTHROPIC_API_KEY=…   && warrant run "…"                      # Anthropic Messages
-export DEEPSEEK_API_KEY=…    && warrant run "…" --provider deepseek  # DeepSeek
-export OPENAI_API_KEY=…      && warrant run "…" --provider openai    # OpenAI
+# Nothing hosted, nothing billed. Ollama, vLLM, LM Studio.
 warrant run "…" --provider local --base-url http://localhost:11434 --model qwen3-coder
+
+# Or any hosted endpoint.
+export DEEPSEEK_API_KEY=…   && warrant run "…" --provider deepseek
+export OPENAI_API_KEY=…     && warrant run "…" --provider openai
+export ANTHROPIC_API_KEY=…  && warrant run "…" --provider anthropic
+
+# Any other gateway on the chat-completions format.
+export OPENAI_API_KEY=…     && warrant run "…" --provider openai --base-url https://openrouter.ai/api
 ```
 
-The last line needs no key and no network — Ollama, vLLM, LM Studio and every hosted gateway (Groq, Together, OpenRouter) speak chat completions. Newer OpenAI reasoning models want `--token-field max_completion_tokens`; everything else accepts the default.
+`--provider` defaults to whichever key is set; pass it explicitly when more than one is. Newer OpenAI reasoning models want `--token-field max_completion_tokens`, and everything else takes the default.
+
+**And none of this is needed for the proof map.** `wrap` and `map` — the commands that produce the number this project exists for — involve no model, no key and no network at all.
 
 ## How this is checked
 
@@ -199,7 +211,7 @@ A tool whose thesis is that unverified assertions should not be trusted has to h
 | **Three `compile_fail` tests** | The type-system invariants (ADR-01, and *no `Delta` from model output*) are compiled by `cargo test`, and the suite fails if any of them ever starts compiling. |
 | **Ten end-to-end tests** | The real binary, on real repositories, with a real command as the proof — including the case on the front page, the honest fix it must *not* flag, and a rewritten git history it must detect. |
 | **A tamper suite that bypasses the API** | Entries removed, relabelled, resealed and edited on disk, plus the one attack a hash chain cannot see on its own (ADR-03). |
-| **Both model transports against a real socket** | Headers, body shape, tool results, every stop reason, error bodies, and which failures may be retried with an identical request — driven through a real HTTP server, for Anthropic Messages *and* chat completions, including a whole session end to end on each. |
+| **Both model transports against a real socket** | Headers, body shape, tool results, every stop reason, error bodies, and which failures may be retried with an identical request — driven through a real HTTP server, for chat completions *and* Anthropic Messages, including a whole session end to end on each. |
 | **Round trips through the record alone** | A session replays from its ledger with every request digest checked; a frozen run reproduces in a world that shares no store, no ledger and no directory with the original. |
 
 `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` are clean. Every commit in the history compiles on its own.
@@ -284,9 +296,9 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 
 <br>
 
-**Decision.** `Provider` is a trait, and exactly two transports implement it: Anthropic Messages, and OpenAI chat completions. The second covers OpenAI, DeepSeek, Groq, Together, Fireworks, OpenRouter and anything self-hosted behind Ollama, vLLM or LM Studio — because they all accept the same request shape.
+**Decision.** `Provider` is a trait, and exactly two transports implement it: OpenAI chat completions and Anthropic Messages. The first covers OpenAI, DeepSeek, Groq, Together, Fireworks, OpenRouter and anything self-hosted behind Ollama, vLLM or LM Studio, because they all accept the same request shape.
 
-**Rationale.** A per-vendor integration is a maintenance surface that grows with the market. A per-*format* integration is two, and the second one is what lets Warrant run against a model on your own laptop with no key and no network.
+**Rationale.** A per-vendor integration is a maintenance surface that grows with the market, and it quietly makes a tool an advertisement for whoever was integrated first. A per-*format* integration is two, and one of the two runs against a model on your own laptop with no key and no network — which is the difference between a tool you can evaluate and a tool you have to buy your way into.
 
 **Where the formats genuinely differ**, each being somewhere a careless adapter breaks: the system prompt is a message rather than a field; tool arguments arrive as a JSON string rather than an object; a tool result is its own message with `role: "tool"` rather than a block inside a user message, and one turn can produce several; token counts are named differently; and the field carrying the output ceiling changed name for newer OpenAI reasoning models, so it is selectable rather than guessed.
 
