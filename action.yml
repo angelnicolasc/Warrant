@@ -13,7 +13,7 @@ branding:
 # runner has those seconds where a reviewer waiting on a terminal does not.
 #
 # Requires `permissions: pull-requests: write` to comment, and a checkout deep
-# enough to contain the base commit — `actions/checkout@v4` with
+# enough to contain the base commit — `actions/checkout@v7` with
 # `fetch-depth: 0`. A probe rebuilds the pre-state, and a shallow tree has no
 # pre-state to rebuild.
 
@@ -176,14 +176,12 @@ runs:
         set -euo pipefail
         echo "key=warrant-$VERSION-${{ runner.os }}-${{ runner.arch }}-$SOURCE" >> "$GITHUB_OUTPUT"
 
-    # Keyed on an immutable tag, so a hit stays correct forever and there is
-    # no staleness to reason about.
     # Restore and save are split rather than using `actions/cache`, which
     # saves whatever is in the path at the end of the job. Here that would
     # store a binary this action never fetched — a workflow that installed its
     # own build of Warrant would publish it under a release's key.
     - name: Restore Warrant
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: ~/.warrant-bin
         key: ${{ steps.key.outputs.key }}
@@ -288,7 +286,7 @@ runs:
     # Only what this action installed, and only when it installed something.
     - name: Save Warrant
       if: steps.have.outputs.have != 'true'
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       with:
         path: ~/.warrant-bin
         key: ${{ steps.key.outputs.key }}
@@ -323,7 +321,7 @@ runs:
         fi
         if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
           echo "The base commit $base is not in this checkout." >&2
-          echo 'Use actions/checkout@v4 with fetch-depth: 0.' >&2
+          echo 'Use actions/checkout@v7 with fetch-depth: 0.' >&2
           exit 1
         fi
         echo "WARRANT_BASE=$base" >> "$GITHUB_ENV"

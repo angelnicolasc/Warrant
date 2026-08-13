@@ -23,7 +23,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -55,7 +55,7 @@ jobs:
     name: minimum supported Rust version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Pinned to the version `rust-version` declares. The floor comes from
       # cranelift, which arrives through wasmtime, so it moves without this
       # workspace changing at all — which is exactly why it is checked rather
@@ -68,7 +68,7 @@ jobs:
     name: the action itself
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # A composite action's shell scripts are not compiled by anything, so a
       # missing `fi` ships and only fails in someone else's pull request.
@@ -126,7 +126,7 @@ jobs:
     steps:
       # Into a subdirectory, because the workspace root is about to become the
       # repository under test. A composite action runs where the caller runs.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: warrant-src
 
@@ -256,7 +256,7 @@ jobs:
     name: release build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
@@ -268,7 +268,7 @@ jobs:
     name: the release pipeline
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
 
       # One source of truth for the version: the config the workflow is
@@ -284,7 +284,7 @@ jobs:
 
       - name: Restore dist
         id: cached
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/dist
           key: dist-${{ runner.os }}-${{ steps.dist.outputs.version }}
