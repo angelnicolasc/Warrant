@@ -60,3 +60,10 @@ strip = "symbols"
 # so dependencies are optimised even in dev profiles.
 [profile.dev.package."*"]
 opt-level = 2
+
+# What ships. Inherits the release profile above rather than restating it, so
+# a published binary is the same build anyone gets from `cargo install` — the
+# alternative is a distribution nobody can reproduce locally.
+[profile.dist]
+inherits = "release"
+lto = "thin"

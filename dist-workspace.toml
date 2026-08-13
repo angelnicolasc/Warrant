@@ -1,0 +1,49 @@
+[workspace]
+members = ["cargo:."]
+
+# Release engineering for `warrant`, generated into
+# `.github/workflows/release.yml` by `dist generate`. CI re-runs that
+# generation with `--check` on every push, so this file and that workflow
+# cannot drift apart without the build going red — the same reason the rest of
+# this repository measures things rather than asserting them.
+[dist]
+cargo-dist-version = "0.32.0"
+ci = "github"
+
+# `curl | sh` is what people expect, so it ships; the checksums and the build
+# attestation below are what make it something a security-minded reader can
+# accept. Homebrew and MSI are deliberately absent — a tap is a second
+# repository to maintain and neither earns that at 0.1.0.
+installers = ["shell", "powershell"]
+
+# Every target is built on hardware of its own architecture rather than under
+# emulation. arm64 runners have been generally available for public
+# repositories since August 2025 and for private ones since January 2026, and
+# a cross-compiled binary nobody executed is exactly the kind of unverified
+# claim this project exists to object to.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+# Build provenance, verifiable with `gh attestation verify`. A tool whose
+# whole argument is that claims should carry evidence cannot ship binaries
+# that carry none.
+github-attestations = true
+
+# Plan on every pull request. The release path is the one path that otherwise
+# runs for the first time when it matters most, on a tag, with an audience.
+pr-run-mode = "plan"
+
+[dist.github-custom-runners]
+aarch64-unknown-linux-gnu = "ubuntu-24.04-arm"
+
+# blake3 compiles SIMD assembly through `cc`, so a musl build needs a musl C
+# toolchain. Without this the target fails at link time and only on that one
+# leg of the matrix.
+[dist.dependencies.apt]
+musl-tools = { targets = ["x86_64-unknown-linux-musl"] }
