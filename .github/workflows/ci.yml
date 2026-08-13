@@ -73,27 +73,34 @@ jobs:
       # A composite action's shell scripts are not compiled by anything, so a
       # missing `fi` ships and only fails in someone else's pull request.
       # `bash -n` parses each one without running it.
+      #
+      # Nothing below may contain a literal workflow expression, not even
+      # inside a comment or a string: this file is scanned for them before it
+      # is a file, and an unevaluatable one stops the whole workflow loading
+      # rather than failing a step. Hence the regex assembled from pieces.
       - name: The action parses, and so does every script in it
         run: |
           python3 - <<'PY'
-          import subprocess, sys, yaml
+          import re, subprocess, sys, yaml
+
           action = yaml.safe_load(open("action.yml"))
-          steps = action["runs"]["steps"]
+          # Substituted before bash ever sees them; a placeholder keeps the
+          # parse honest about the quoting around them.
+          expression = re.compile(r"\$" + "[{]{2}" + r"[^}]*" + "[}]{2}")
+
           checked = 0
-          for step in steps:
+          for step in action["runs"]["steps"]:
               script = step.get("run")
               if script is None:
                   continue
               assert step.get("shell") == "bash", f"{step.get('name')!r} has no shell"
-              # GitHub substitutes ${{ }} before bash sees it; a placeholder
-              # keeps the parse honest about the surrounding quoting.
-              import re
-              probe = re.sub(r"\$\{\{[^}]*\}\}", "placeholder", script)
+              probe = expression.sub("placeholder", script)
               result = subprocess.run(["bash", "-n"], input=probe, text=True,
                                       capture_output=True)
               if result.returncode != 0:
                   sys.exit(f"{step.get('name')!r} does not parse:\n{result.stderr}")
               checked += 1
+
           assert checked >= 4, f"only {checked} scripts checked; the action lost steps"
           for name in ("outcome", "coverage", "tampered", "markdown"):
               assert name in action["outputs"], f"missing output {name}"
