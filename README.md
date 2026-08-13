@@ -278,7 +278,9 @@ The whole run is **one search**. Three renderings — the step summary, the JSON
 
 With `strict`, the gate is raised *after* the comment is posted, so a finding always reaches the pull request even when the check goes red.
 
-Everything is optional: `proof`, `against`, `strict`, `min-coverage`, `jobs`, `max-probes`, `timeout`, `comment`, `receipt`. With none of them set it maps the head of the pull request against its base, using the test command your repository already declares, and leaves a comment.
+Everything is optional: `proof`, `against`, `strict`, `min-coverage`, `jobs`, `max-probes`, `timeout`, `comment`, `receipt`, `version`, `from-source`. With none of them set it maps the head of the pull request against its base, using the test command your repository already declares, and leaves a comment.
+
+`@v0` tracks the latest 0.x if you would rather not bump a pin; `@v0.1.0` is the one that reproduces. The last two inputs exist for the edges: `version` overrides which release runs, and `from-source` builds it on the runner for an architecture no release targets — minutes rather than seconds, which is why it is asked for rather than fallen into.
 
 ### Warrant as the harness
 
