@@ -34,8 +34,14 @@ inputs:
     description: >-
       Fail the check on a finding: a load-bearing test edit, a vacuous proof,
       an unstable one, or a proof that does not hold at all.
+
+      Off by default, and not out of timidity. A documentation-only pull
+      request maps as vacuous — the suite passed before it and after it, so it
+      proves nothing about the change — which is a true statement and a
+      terrible reason to block a merge. Read the comments for a week, find out
+      what your repository's numbers actually look like, then turn this on.
     required: false
-    default: "true"
+    default: "false"
   min-coverage:
     description: >-
       Under strict, the percentage of changed lines that must be load-bearing.

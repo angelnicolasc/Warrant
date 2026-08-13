@@ -239,9 +239,20 @@ The comment it leaves is the reading list, edited in place on every push rather 
 > | `src/retry.txt` | 4 | 0 | read it — unproven, revert-safe |
 > | `tests/expected_config.txt` | 2 | 2 | ⚠️ load-bearing test edit |
 
-The whole run is **one search**. Three renderings — the step summary, the JSON the action reads its outputs from, and that comment — all come off the same map, because a second rendering that cost a second search would cost another full pass over your suite. `--strict` decides the check, and the gate is raised *after* the comment is posted so a finding always reaches the pull request even when the check goes red.
+The whole run is **one search**. Three renderings — the step summary, the JSON the action reads its outputs from, and that comment — all come off the same map, because a second rendering that cost a second search would cost another full pass over your suite.
 
-Everything is optional: `proof`, `against`, `min-coverage`, `jobs`, `max-probes`, `timeout`, `comment`, `receipt`. With none of them set it maps the head of the pull request against its base, using the test command your repository already declares.
+**It does not block your merges by default**, and that is a considered choice rather than a timid one. A documentation-only pull request maps as *vacuous* — the suite passed before it and passed after it, so it proves nothing about the change — which is a true statement and a terrible reason to stop a merge. Read the comments for a week, find out what your repository's numbers actually look like, and then turn the gate on:
+
+```yaml
+      - uses: angelnicolasc/warrant@main
+        with:
+          strict: true
+          min-coverage: 40
+```
+
+With `strict`, the gate is raised *after* the comment is posted, so a finding always reaches the pull request even when the check goes red.
+
+Everything is optional: `proof`, `against`, `strict`, `min-coverage`, `jobs`, `max-probes`, `timeout`, `comment`, `receipt`. With none of them set it maps the head of the pull request against its base, using the test command your repository already declares, and leaves a comment.
 
 ### Warrant as the harness
 
