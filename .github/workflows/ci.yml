@@ -64,6 +64,42 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --all-targets
 
+  action:
+    name: the action itself
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A composite action's shell scripts are not compiled by anything, so a
+      # missing `fi` ships and only fails in someone else's pull request.
+      # `bash -n` parses each one without running it.
+      - name: The action parses, and so does every script in it
+        run: |
+          python3 - <<'PY'
+          import subprocess, sys, yaml
+          action = yaml.safe_load(open("action.yml"))
+          steps = action["runs"]["steps"]
+          checked = 0
+          for step in steps:
+              script = step.get("run")
+              if script is None:
+                  continue
+              assert step.get("shell") == "bash", f"{step.get('name')!r} has no shell"
+              # GitHub substitutes ${{ }} before bash sees it; a placeholder
+              # keeps the parse honest about the surrounding quoting.
+              import re
+              probe = re.sub(r"\$\{\{[^}]*\}\}", "placeholder", script)
+              result = subprocess.run(["bash", "-n"], input=probe, text=True,
+                                      capture_output=True)
+              if result.returncode != 0:
+                  sys.exit(f"{step.get('name')!r} does not parse:\n{result.stderr}")
+              checked += 1
+          assert checked >= 4, f"only {checked} scripts checked; the action lost steps"
+          for name in ("outcome", "coverage", "tampered", "markdown"):
+              assert name in action["outputs"], f"missing output {name}"
+          print(f"action.yml parses; {checked} shell scripts parse")
+          PY
+
   release-build:
     name: release build
     runs-on: ubuntu-latest

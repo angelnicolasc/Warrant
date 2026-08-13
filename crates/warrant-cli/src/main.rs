@@ -225,6 +225,22 @@ struct MappingOptions {
     #[arg(long)]
     json: bool,
 
+    /// Emit the map as Markdown, for a pull-request comment.
+    #[arg(long, conflicts_with = "json")]
+    markdown: bool,
+
+    /// Also write the map as JSON to a file.
+    ///
+    /// A search costs one run of the test command per probe, so asking for a
+    /// second rendering must never mean asking for a second search. Every
+    /// output form comes off the same map.
+    #[arg(long, value_name = "PATH")]
+    out_json: Option<PathBuf>,
+
+    /// Also write the Markdown comment body to a file.
+    #[arg(long, value_name = "PATH")]
+    out_markdown: Option<PathBuf>,
+
     /// Exit non-zero on a finding, for continuous integration.
     #[arg(long)]
     strict: bool,
@@ -441,7 +457,11 @@ fn cmd_map(
         isolation,
     };
 
-    println!();
+    // Nothing but the map may reach stdout when the map is being piped
+    // somewhere — a pull-request comment, or a `jq`.
+    if !options.json && !options.markdown {
+        println!();
+    }
     let outcome = execute(request, &ledger, blobs)?;
     ledger.append_json(
         EntryKind::RunFinished,
@@ -683,8 +703,14 @@ fn report(
     options: &MappingOptions,
     glyphs: &Glyphs,
 ) -> Result<ExitCode> {
+    let machine_readable = options.json || options.markdown;
     if options.json {
         println!("{}", serde_json::to_string_pretty(&outcome.map)?);
+    } else if options.markdown {
+        print!(
+            "{}",
+            render::render_markdown(&outcome.map, &outcome.proof_source, outcome.proof_defaulted)
+        );
     } else {
         print!(
             "{}",
@@ -693,10 +719,21 @@ fn report(
         println!();
     }
 
+    if let Some(path) = &options.out_json {
+        std::fs::write(path, serde_json::to_string_pretty(&outcome.map)?)
+            .with_context(|| format!("writing the map to {}", path.display()))?;
+    }
+    if let Some(path) = &options.out_markdown {
+        let body =
+            render::render_markdown(&outcome.map, &outcome.proof_source, outcome.proof_defaulted);
+        std::fs::write(path, body)
+            .with_context(|| format!("writing the comment body to {}", path.display()))?;
+    }
+
     if let Some(path) = &options.receipt {
         std::fs::write(path, outcome.receipt.to_json()?)
             .with_context(|| format!("writing the receipt to {}", path.display()))?;
-        if !options.json {
+        if !machine_readable {
             println!("  receipt written to {}", path.display());
             println!();
         }

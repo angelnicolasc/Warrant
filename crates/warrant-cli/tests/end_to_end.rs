@@ -215,6 +215,93 @@ fn trimming_a_laundered_green_still_shows_the_tampering() {
     );
 }
 
+/// What the CI action depends on: one search, three renderings, and a gate.
+///
+/// A second rendering that cost a second search would cost another whole pass
+/// over the repository's suite, so the probe count is asserted rather than
+/// assumed — it is the difference between a tool that belongs in CI and one
+/// that does not.
+#[test]
+fn one_search_produces_every_rendering_and_the_exit_code() {
+    let repo = fixture();
+    git(repo.path(), &["checkout", "--quiet", "laundered", "--", "."]);
+
+    let output = run_warrant(
+        repo.path(),
+        &[
+            "map",
+            "--proof",
+            PROOF,
+            "--ascii",
+            "--strict",
+            "--out-json",
+            "map.json",
+            "--out-markdown",
+            "map.md",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(2), "a laundered green must fail the gate");
+    assert!(stdout(&output).contains("load-bearing test edit"), "{}", stdout(&output));
+
+    let json = std::fs::read_to_string(repo.path().join("map.json")).unwrap();
+    let map: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(map["outcome"], "mapped");
+    assert_eq!(map["tamper"].as_array().unwrap().len(), 1);
+
+    let body = std::fs::read_to_string(repo.path().join("map.md")).unwrap();
+    assert!(body.starts_with("<!-- warrant:necessity-map -->"), "{body}");
+    assert!(body.contains("> [!WARNING]"), "{body}");
+    assert!(body.contains("| `tests/expected_config.txt` |"), "{body}");
+
+    // Every line of a GitHub callout needs its own marker or it renders as
+    // one run-on paragraph.
+    let mut inside = false;
+    for line in body.lines() {
+        if line.starts_with("> [!") {
+            inside = true;
+            continue;
+        }
+        if inside && line.trim().is_empty() {
+            inside = false;
+            continue;
+        }
+        assert!(!inside || line.starts_with('>'), "callout line lost its marker: {line:?}");
+    }
+
+    // One search. The probes the ledger recorded are the probes that ran.
+    let probes = map["probes"].as_u64().unwrap();
+    let log = stdout(&run_warrant(repo.path(), &["log", "--limit", "500", "--ascii"]));
+    let recorded = log.lines().filter(|l| l.contains("  probe ")).count() as u64;
+    assert_eq!(
+        recorded, probes,
+        "three renderings must not cost three searches; the ledger recorded {recorded} probes \
+         against a map claiming {probes}"
+    );
+}
+
+/// The CI action finds its own previous comment by the marker the tool emits.
+/// Nothing compiles `action.yml`, so if the two ever drift, every push posts
+/// a new comment instead of editing the one already there — and a bot that
+/// does that is a bot people mute.
+#[test]
+fn the_action_looks_for_the_marker_the_tool_actually_writes() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let action = std::fs::read_to_string(root.join("action.yml")).unwrap();
+
+    let repo = fixture();
+    git(repo.path(), &["checkout", "--quiet", "honest", "--", "."]);
+    run_warrant(repo.path(), &["map", "--proof", PROOF, "--ascii", "--out-markdown", "c.md"]);
+    let body = std::fs::read_to_string(repo.path().join("c.md")).unwrap();
+
+    let marker = body.lines().next().expect("a comment body starts with its marker");
+    assert!(marker.starts_with("<!--"), "expected an HTML comment, got {marker:?}");
+    assert!(
+        action.contains(marker),
+        "action.yml does not look for {marker:?}, so it would post a new comment every push"
+    );
+}
+
 #[test]
 fn the_record_verifies_and_matches_repository_history() {
     let repo = fixture();

@@ -227,6 +227,113 @@ pub fn render_map(
     out
 }
 
+/// The marker a pull-request comment is found by, so a second run edits the
+/// first comment instead of adding another one.
+pub const COMMENT_MARKER: &str = "<!-- warrant:necessity-map -->";
+
+/// Render a map as the body of a pull-request comment.
+///
+/// This lives in the tool rather than in shell glue around it for the same
+/// reason the terminal rendering does: the wording of a finding is part of the
+/// finding, and a CI integration that paraphrased it would drift from what the
+/// map actually says.
+pub fn render_markdown(map: &NecessityMap, proof_source: &str, proof_defaulted: bool) -> String {
+    let mut out = String::new();
+    out.push_str(COMMENT_MARKER);
+    out.push('\n');
+
+    if map.outcome != MapOutcome::Mapped {
+        out.push_str(&format!("### Warrant: {}\n\n", map.outcome.describe()));
+        out.push_str(match map.outcome {
+            MapOutcome::NotSatisfied => {
+                "The proof does not hold on this branch, so there is nothing to map. \
+                 Whatever else is true of this change, the thing it was supposed to make \
+                 pass does not pass.\n"
+            }
+            MapOutcome::Vacuous => {
+                "The proof already held before any of this work was done, so it proves \
+                 nothing about the change. Coverage is undefined here rather than zero — \
+                 the reading list is the whole diff.\n"
+            }
+            MapOutcome::UnstableProof => {
+                "The proof answered differently on identical state. The suite is flaky, \
+                 and no map built on contradictory probes would be worth reading.\n"
+            }
+            MapOutcome::NoChanges => "Nothing changed on disk.\n",
+            MapOutcome::Mapped => unreachable!("handled above"),
+        });
+        out.push_str(&format!("\n<sub>proof: `{proof_source}`</sub>\n"));
+        return out;
+    }
+
+    let changed: u64 = map.files.iter().map(|f| f.changed_lines).sum();
+    let proven: u64 = map.files.iter().map(|f| f.proven_lines).sum();
+    let to_read = changed.saturating_sub(proven);
+
+    out.push_str(&format!("### Read {to_read} of {changed} changed lines\n\n"));
+
+    if map.has_tampering() {
+        out.push_str("> [!WARNING]\n");
+        out.push_str("> **A load-bearing hunk sits inside a test file.**\n");
+        out.push_str(
+            "> Reverting it makes the proof fail, which means part of why this suite is \
+             green is that the change edited the thing doing the proving.\n\n",
+        );
+    }
+
+    out.push_str(&format!(
+        "{proven} lines are load-bearing: revert any one of their hunks and the proof turns red. \
+         The other {to_read} revert without it noticing.\n\n"
+    ));
+
+    out.push_str("| file | changed | load-bearing | |\n|---|--:|--:|---|\n");
+    let mut files: Vec<&FileVerdict> = map.files.iter().collect();
+    files.sort_by_key(|f| (f.tampered, fully_proven(f), f.path.clone()));
+    for f in files {
+        let note = if f.tampered {
+            "⚠️ load-bearing test edit"
+        } else if f.is_entirely_unproven() {
+            "read it — unproven, revert-safe"
+        } else if fully_proven(f) {
+            "proven"
+        } else {
+            "read the rest"
+        };
+        out.push_str(&format!(
+            "| `{}` | {} | {} | {note} |\n",
+            f.path, f.changed_lines, f.proven_lines
+        ));
+    }
+
+    if !map.monotonicity_violations.is_empty() {
+        out.push_str("\n> [!NOTE]\n");
+        out.push_str(&format!(
+            "> The proof contradicted itself on {} hunks. Treat this map as approximate and \
+             look at suite flakiness.\n",
+            map.monotonicity_violations.len()
+        ));
+    }
+    if map.budget_exhausted {
+        out.push_str("\n> [!NOTE]\n");
+        out.push_str(
+            "> The probe budget ran out, so this map is coarser than it could be. Raise \
+             `--max-probes`.\n",
+        );
+    }
+
+    let origin = if proof_defaulted { " (detected from the repository)" } else { "" };
+    out.push_str(&format!(
+        "\n<details>\n<summary>How this was measured</summary>\n\n\
+         Every hunk above was reverted and the proof re-run. What survived the revert without \
+         breaking it was never proven by it.\n\n\
+         ```\n{proof_source}\n```\n\n\
+         {} probes in {} rounds{origin}. Necessity is not sufficiency: load-bearing means the \
+         proof depends on it, not that it is correct.\n</details>\n",
+        map.probes, map.rounds
+    ));
+    out
+}
+
 /// Render what a trim would take back, and whether the result held.
 pub fn render_trim(plan: &TrimPlan, write: bool, glyphs: &Glyphs) -> String {
     let mut out = String::new();
@@ -326,6 +433,14 @@ mod tests {
                 .map(|i| HunkId::derive(&[b"up", &[i as u8]]))
                 .collect();
         map.minimality_confirmed = true;
+        // The tamper set is drawn from the same files, so a fixture cannot
+        // claim a flagged file and a clean map at the same time.
+        map.tamper = map
+            .load_bearing
+            .iter()
+            .copied()
+            .take(files.iter().filter(|f| f.tampered).map(|f| f.load_bearing_hunks).sum())
+            .collect();
         map.files = files;
         map
     }
@@ -454,6 +569,58 @@ mod tests {
             dropped_lines: lines,
             fully_reverted: fully,
         }
+    }
+
+    /// A pull-request comment is generated by the tool, so the wording of a
+    /// finding cannot drift from what the map says. Every line of a blockquote
+    /// needs its own marker, which is the one thing a wrapped Rust string
+    /// literal quietly gets wrong.
+    #[test]
+    fn every_line_of_a_markdown_callout_carries_its_own_marker() {
+        let map = map_with(
+            MapOutcome::Mapped,
+            vec![verdict("tests/t.py", 1, 1, true), verdict("src/a.py", 0, 3, false)],
+        );
+        let body = render_markdown(&map, "pytest -q", true);
+
+        let mut inside = false;
+        for line in body.lines() {
+            if line.starts_with("> [!") {
+                inside = true;
+                continue;
+            }
+            if inside && line.trim().is_empty() {
+                inside = false;
+                continue;
+            }
+            assert!(!inside || line.starts_with('>'), "callout line lost its marker: {line:?}");
+        }
+        assert!(body.contains("> [!WARNING]"), "{body}");
+    }
+
+    #[test]
+    fn a_comment_leads_with_the_reading_list_and_carries_a_marker() {
+        let map = map_with(
+            MapOutcome::Mapped,
+            vec![verdict("src/a.py", 3, 4, false), verdict("src/b.py", 0, 2, false)],
+        );
+        let body = render_markdown(&map, "pytest -q", true);
+
+        assert!(body.starts_with(COMMENT_MARKER), "a second run must be able to find it:\n{body}");
+        assert!(body.contains("### Read 30 of 60 changed lines"), "{body}");
+        assert!(body.contains("| `src/b.py` | 20 | 0 | read it"), "{body}");
+        assert!(body.contains("Necessity is not sufficiency"), "the caveat travels:\n{body}");
+        assert!(!body.contains("[!WARNING]"), "nothing was tampered with:\n{body}");
+    }
+
+    /// An outcome that is not a map must not render as one — a table of zeroes
+    /// under a "read 0 lines" headline would read as an all-clear.
+    #[test]
+    fn a_vacuous_proof_produces_a_comment_about_the_proof_not_a_table() {
+        let body = render_markdown(&empty_map(MapOutcome::Vacuous), "pytest", false);
+        assert!(body.starts_with(COMMENT_MARKER));
+        assert!(body.contains("already held before"), "{body}");
+        assert!(!body.contains("| file |"), "no map means no table:\n{body}");
     }
 
     #[test]

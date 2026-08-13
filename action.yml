@@ -1,0 +1,218 @@
+name: Warrant
+description: >-
+  Map which lines of a pull request the test suite actually stands behind, and
+  post the reading list as a comment.
+author: angelnicolasc
+
+branding:
+  icon: check-square
+  color: orange
+
+# The reason to run this here rather than on a laptop is that the cost leaves
+# the human path entirely. A map costs one run of the suite per probe, and a
+# runner has those seconds where a reviewer waiting on a terminal does not.
+#
+# Requires `permissions: pull-requests: write` to comment, and a checkout deep
+# enough to contain the base commit — `actions/checkout@v4` with
+# `fetch-depth: 0`. A probe rebuilds the pre-state, and a shallow tree has no
+# pre-state to rebuild.
+
+inputs:
+  proof:
+    description: >-
+      The proof to map against. Defaults to whatever test command the
+      repository already declares, which is detected the way a person would.
+    required: false
+    default: ""
+  against:
+    description: >-
+      Git reference to compare against. Defaults to the base of the pull
+      request.
+    required: false
+    default: ""
+  strict:
+    description: >-
+      Fail the check on a finding: a load-bearing test edit, a vacuous proof,
+      an unstable one, or a proof that does not hold at all.
+    required: false
+    default: "true"
+  min-coverage:
+    description: >-
+      Under strict, the percentage of changed lines that must be load-bearing.
+      Unset by default. A low number is a fact about a change, and turning it
+      into a gate on day one teaches people to pad diffs.
+    required: false
+    default: ""
+  jobs:
+    description: >-
+      How many probes to run at once. Probes at the same level of the search
+      are independent, so this trades compute for wall clock. `1` maps
+      sequentially.
+    required: false
+    default: ""
+  max-probes:
+    description: Ceiling on probes, for very large diffs.
+    required: false
+    default: ""
+  timeout:
+    description: Per-command timeout inside a probe, in seconds.
+    required: false
+    default: ""
+  comment:
+    description: Post the map as a pull-request comment.
+    required: false
+    default: "true"
+  warrant-ref:
+    description: >-
+      Branch or tag of Warrant itself to build. Pin a tag to pin the
+      behaviour.
+    required: false
+    default: main
+  receipt:
+    description: Path to write the signed receipt to. Unset writes none.
+    required: false
+    default: ""
+
+outputs:
+  outcome:
+    description: mapped, not_satisfied, vacuous, unstable_proof or no_changes.
+    value: ${{ steps.map.outputs.outcome }}
+  coverage:
+    description: Percentage of changed lines that are load-bearing, or empty.
+    value: ${{ steps.map.outputs.coverage }}
+  tampered:
+    description: true when a load-bearing hunk sits on a verification surface.
+    value: ${{ steps.map.outputs.tampered }}
+  markdown:
+    description: Path to the rendered comment body.
+    value: ${{ steps.map.outputs.markdown }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    # Cache the built binary rather than a target directory. A composite
+    # action shares the caller's workspace, and a build cache keyed on this
+    # repository's dependencies has no business landing in theirs.
+    - name: Restore Warrant
+      id: cached
+      uses: actions/cache@v4
+      with:
+        path: ~/.warrant-bin
+        key: warrant-${{ runner.os }}-${{ inputs.warrant-ref }}
+
+    - name: Build Warrant
+      if: steps.cached.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        src="$RUNNER_TEMP/warrant-src"
+        rm -rf "$src"
+        git clone --quiet --depth 1 --branch "${{ inputs.warrant-ref }}" \
+          https://github.com/angelnicolasc/warrant "$src"
+        cargo install --locked --path "$src/crates/warrant-cli" --root ~/.warrant-bin
+
+    - name: Put Warrant on the path
+      shell: bash
+      run: echo "$HOME/.warrant-bin/bin" >> "$GITHUB_PATH"
+
+    - name: Resolve the base commit
+      shell: bash
+      run: |
+        set -euo pipefail
+        base='${{ inputs.against }}'
+        if [ -z "$base" ]; then
+          base='${{ github.event.pull_request.base.sha }}'
+        fi
+        if [ -z "$base" ]; then
+          echo 'No base to compare against. Run this on a pull request, or set the "against" input.' >&2
+          exit 1
+        fi
+        # A probe rebuilds the pre-state, so the base object has to be here.
+        # Deepening is the fallback; checkout with fetch-depth 0 is the fix.
+        if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+          git fetch --no-tags --quiet origin "$base" || git fetch --no-tags --quiet --unshallow origin || true
+        fi
+        if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+          echo "The base commit $base is not in this checkout." >&2
+          echo 'Use actions/checkout@v4 with fetch-depth: 0.' >&2
+          exit 1
+        fi
+        echo "WARRANT_BASE=$base" >> "$GITHUB_ENV"
+
+    # One search. Every probe is a run of the repository's test command, so a
+    # second rendering must never cost a second search: the terminal report,
+    # the JSON and the comment body all come off the same map.
+    - name: Map
+      id: map
+      shell: bash
+      run: |
+        set -uo pipefail
+        args=(map --against "$WARRANT_BASE" --ascii)
+        args+=(--out-json warrant-map.json --out-markdown warrant-map.md)
+        if [ -n '${{ inputs.proof }}' ];      then args+=(--proof '${{ inputs.proof }}'); fi
+        if [ -n '${{ inputs.jobs }}' ];       then args+=(--jobs '${{ inputs.jobs }}'); fi
+        if [ -n '${{ inputs.max-probes }}' ]; then args+=(--max-probes '${{ inputs.max-probes }}'); fi
+        if [ -n '${{ inputs.timeout }}' ];    then args+=(--timeout '${{ inputs.timeout }}'); fi
+        if [ -n '${{ inputs.receipt }}' ];    then args+=(--receipt '${{ inputs.receipt }}'); fi
+        if [ '${{ inputs.strict }}' = 'true' ]; then
+          args+=(--strict)
+          if [ -n '${{ inputs.min-coverage }}' ]; then
+            args+=(--min-coverage '${{ inputs.min-coverage }}')
+          fi
+        fi
+
+        # The gate's verdict is held until the comment is posted. A finding
+        # nobody can see is worse than no finding, and a step that fails here
+        # ends the job before the comment would be written.
+        warrant "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+        gate=${PIPESTATUS[0]}
+
+        if [ ! -f warrant-map.json ]; then
+          echo 'The map did not run to completion; see the log above.' >&2
+          exit "$gate"
+        fi
+
+        changed=$(jq '[.files[].changed_lines] | add // 0' warrant-map.json)
+        proven=$(jq '[.files[].proven_lines] | add // 0' warrant-map.json)
+        coverage=""
+        if [ "$changed" -gt 0 ]; then coverage=$(( proven * 100 / changed )); fi
+
+        {
+          echo "outcome=$(jq -r '.outcome' warrant-map.json)"
+          echo "tampered=$(jq -r '(.tamper | length) > 0' warrant-map.json)"
+          echo "coverage=$coverage"
+          echo "markdown=warrant-map.md"
+          echo "gate=$gate"
+        } >> "$GITHUB_OUTPUT"
+
+    # One comment, edited in place. A bot that appends a new one on every push
+    # is a bot people mute, and a muted finding is no finding at all.
+    - name: Comment
+      if: ${{ inputs.comment == 'true' && github.event.pull_request.number }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        marker='<!-- warrant:necessity-map -->'
+        existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -1)
+
+        if [ -n "$existing" ]; then
+          gh api --method PATCH "repos/$REPO/issues/comments/$existing" -F body=@warrant-map.md
+        else
+          gh api --method POST "repos/$REPO/issues/$PR/comments" -F body=@warrant-map.md
+        fi
+
+    # Last, so a finding always reaches the pull request before the check goes
+    # red. This re-raises the exit code the map already produced; it does not
+    # re-decide anything, and it does not re-run the search.
+    - name: Gate
+      if: ${{ inputs.strict == 'true' }}
+      shell: bash
+      run: exit ${{ steps.map.outputs.gate }}

@@ -207,6 +207,42 @@ The trade is a third more compute for a fifth to a third less time. On a suite t
 warrant map --against origin/main --strict --min-coverage 40
 ```
 
+### Get the reading list before you open the diff
+
+Mapping costs one run of your suite per probe. A runner has those seconds; a reviewer sitting in front of a terminal does not. So the honest place for this is CI, where the cost never lands on anyone's clock:
+
+```yaml
+# .github/workflows/warrant.yml
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  warrant:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # a probe rebuilds the pre-state
+      - uses: angelnicolasc/warrant@main
+```
+
+The comment it leaves is the reading list, edited in place on every push rather than appended — a bot that posts a new comment each time is a bot people mute, and a muted finding is no finding at all:
+
+> ### Read 8 of 10 changed lines
+>
+> **⚠ A load-bearing hunk sits inside a test file.** Reverting it makes the proof fail, which means part of why this suite is green is that the change edited the thing doing the proving.
+>
+> | file | changed | load-bearing | |
+> |---|--:|--:|---|
+> | `docs/notes.md` | 2 | 0 | read it — unproven, revert-safe |
+> | `src/pool.txt` | 2 | 0 | read it — unproven, revert-safe |
+> | `src/retry.txt` | 4 | 0 | read it — unproven, revert-safe |
+> | `tests/expected_config.txt` | 2 | 2 | ⚠️ load-bearing test edit |
+
+The whole run is **one search**. Three renderings — the step summary, the JSON the action reads its outputs from, and that comment — all come off the same map, because a second rendering that cost a second search would cost another full pass over your suite. `--strict` decides the check, and the gate is raised *after* the comment is posted so a finding always reaches the pull request even when the check goes red.
+
+Everything is optional: `proof`, `against`, `min-coverage`, `jobs`, `max-probes`, `timeout`, `comment`, `receipt`. With none of them set it maps the head of the pull request against its base, using the test command your repository already declares.
+
 ### Warrant as the harness
 
 The commands above need no model. These drive one:
@@ -252,13 +288,14 @@ export OPENAI_API_KEY=…     && warrant run "…" --provider openai --base-url 
 
 ## How this is checked
 
-A tool whose thesis is that unverified assertions should not be trusted has to hold itself to it. `cargo test --workspace` runs **403 tests**, and the ones that matter are not unit tests:
+A tool whose thesis is that unverified assertions should not be trusted has to hold itself to it. `cargo test --workspace` runs **408 tests**, and the ones that matter are not unit tests:
 
 | | |
 |---|---|
 | **Five property tests, 400 cases each** | Random file trees, random subsets. Applying nothing must reproduce the pre-state byte for byte; applying everything must reproduce the post-state byte for byte. Everything downstream is meaningless without those two. |
 | **Three `compile_fail` tests** | The type-system invariants (ADR-01, and *no `Delta` from model output*) are compiled by `cargo test`, and the suite fails if any of them ever starts compiling. |
-| **Twelve end-to-end tests** | The real binary, on real repositories, with a real command as the proof — including both cases on the front page, the honest fix it must *not* flag, a trim that takes work off and re-runs the suite on what is left, and a rewritten git history it must detect. |
+| **Fourteen end-to-end tests** | The real binary, on real repositories, with a real command as the proof — including both cases on the front page, the honest fix it must *not* flag, a trim that takes work off and re-runs the suite on what is left, and a rewritten git history it must detect. |
+| **The CI action is held to the tool** | One run must produce all three renderings, and the probe count in the map is checked against the probes the ledger recorded — three renderings may not cost three searches. The marker the action greps for is read out of `action.yml` and compared against the one the tool emits, because nothing compiles a composite action. |
 | **The pool changes the schedule, never the map** | The same scenario is mapped at width 1 and width 4 and the two maps are compared whole, with only the two cost fields normalised away — so a field added later is compared too, rather than silently skipped. |
 | **A tamper suite that bypasses the API** | Entries removed, relabelled, resealed and edited on disk, plus the one attack a hash chain cannot see on its own (ADR-03). |
 | **Both model transports against a real socket** | Headers, body shape, tool results, every stop reason, error bodies, and which failures may be retried with an identical request — driven through a real HTTP server, for chat completions *and* Anthropic Messages, including a whole session end to end on each. |
