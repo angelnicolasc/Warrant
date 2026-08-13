@@ -1917,7 +1917,7 @@ dependencies = [
 
 [[package]]
 name = "warrant-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "globset",
  "hex",
@@ -1937,7 +1937,7 @@ dependencies = [
 
 [[package]]
 name = "warrant-attest"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "globset",
  "serde",
@@ -1954,7 +1954,7 @@ dependencies = [
 
 [[package]]
 name = "warrant-cell"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1968,7 +1968,7 @@ dependencies = [
 
 [[package]]
 name = "warrant-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1987,7 +1987,7 @@ dependencies = [
 
 [[package]]
 name = "warrant-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blake3",
  "hex",
@@ -1998,7 +1998,7 @@ dependencies = [
 
 [[package]]
 name = "warrant-diff"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ignore",
  "proptest",
@@ -2013,7 +2013,7 @@ dependencies = [
 
 [[package]]
 name = "warrant-ledger"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "redb",
  "serde",
@@ -2025,7 +2025,7 @@ dependencies = [
 
 [[package]]
 name = "warrant-necessity"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "globset",
  "proptest",
@@ -2041,7 +2041,7 @@ dependencies = [
 
 [[package]]
 name = "warrant-receipt"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64",
  "ed25519-dalek",

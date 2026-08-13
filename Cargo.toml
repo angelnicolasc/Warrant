@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 # Measured, not assumed. 1.90 was tried and refused: `cranelift-assembler-x64`
 # and its siblings, which arrive through wasmtime, declare 1.94.0 themselves.
@@ -15,14 +15,14 @@ repository = "https://github.com/angelnicolasc/warrant"
 authors = ["angelnicolasc"]
 
 [workspace.dependencies]
-warrant-core = { path = "crates/warrant-core", version = "0.1.0" }
-warrant-ledger = { path = "crates/warrant-ledger", version = "0.1.0" }
-warrant-diff = { path = "crates/warrant-diff", version = "0.1.0" }
-warrant-cell = { path = "crates/warrant-cell", version = "0.1.0" }
-warrant-attest = { path = "crates/warrant-attest", version = "0.1.0" }
-warrant-necessity = { path = "crates/warrant-necessity", version = "0.1.0" }
-warrant-receipt = { path = "crates/warrant-receipt", version = "0.1.0" }
-warrant-agent = { path = "crates/warrant-agent", version = "0.1.0" }
+warrant-core = { path = "crates/warrant-core", version = "0.1.1" }
+warrant-ledger = { path = "crates/warrant-ledger", version = "0.1.1" }
+warrant-diff = { path = "crates/warrant-diff", version = "0.1.1" }
+warrant-cell = { path = "crates/warrant-cell", version = "0.1.1" }
+warrant-attest = { path = "crates/warrant-attest", version = "0.1.1" }
+warrant-necessity = { path = "crates/warrant-necessity", version = "0.1.1" }
+warrant-receipt = { path = "crates/warrant-receipt", version = "0.1.1" }
+warrant-agent = { path = "crates/warrant-agent", version = "0.1.1" }
 
 anyhow = "1.0"
 base64 = "0.23"

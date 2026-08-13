@@ -30,19 +30,14 @@ targets = [
     "x86_64-pc-windows-msvc",
 ]
 
-# Off, and not by choice. Build provenance is the right thing for a tool
-# whose whole argument is that claims should carry evidence, and the first
-# tagged build proved the point the hard way: every target compiled, and
-# every one of them then failed on
+# Build provenance, verifiable with `gh attestation verify`. A tool whose
+# whole argument is that claims should carry evidence cannot ship binaries
+# that carry none.
 #
-#   Failed to persist attestation: Feature not available for user-owned
-#   private repositories. To enable this feature, please make this
-#   repository public.
-#
-# So this is a platform limit rather than a decision, and it lifts the moment
-# this repository is public. Turning it back on is this line. Until then the
-# SHA-256 beside each archive is what a download can be checked against.
-github-attestations = false
+# This was off for v0.1.0 and not by choice: every target compiled and every
+# one then failed with "Feature not available for user-owned private
+# repositories". Attestations require a public repository, which this now is.
+github-attestations = true
 
 # Plan on every pull request. The release path is the one path that otherwise
 # runs for the first time when it matters most, on a tag, with an audience.

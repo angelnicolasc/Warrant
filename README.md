@@ -111,11 +111,15 @@ cargo binstall warrant-cli     # the released binary, no build
 Piping a script into a shell is a reasonable thing to be unwilling to do, and this is a project about not taking claims on faith. Every archive ships beside its SHA-256, so you can fetch it, check it, and only then run anything:
 
 ```bash
-gh release download v0.1.0 --repo angelnicolasc/warrant --pattern '*x86_64-unknown-linux-musl*'
+gh release download v0.1.1 --repo angelnicolasc/warrant --pattern '*x86_64-unknown-linux-musl*'
 sha256sum -c warrant-cli-x86_64-unknown-linux-musl.tar.xz.sha256
 ```
 
-Public releases also carry [build provenance](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds), so `gh attestation verify <archive> --repo angelnicolasc/warrant` will tell you it was built by this workflow from this repository — see ADR-12 for why that is not on every release here yet.
+Releases also carry [build provenance](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds), so you can check the archive was built by this workflow from this repository before trusting it:
+
+```bash
+gh attestation verify warrant-cli-x86_64-unknown-linux-musl.tar.xz --repo angelnicolasc/warrant
+```
 
 The x86-64 Linux build links against musl, so it is genuinely static and runs unchanged inside whatever container you put it in. Building from source needs Rust 1.94 or newer, which is a floor set by `cranelift` arriving through `wasmtime`, not by this workspace.
 
@@ -253,7 +257,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }   # a probe rebuilds the pre-state
-      - uses: angelnicolasc/warrant@v0.1.0
+      - uses: angelnicolasc/warrant@v0.1.1
 ```
 
 Pinning the action pins the binary: the version tag you reference is the release it downloads, checksum-verified, cached on an immutable key. There is no build step — an action that compiled a `wasmtime`-backed workspace on every cache miss would be the slow job everybody learns to skip.
@@ -278,7 +282,7 @@ The whole run is **one search**. Three renderings — the step summary, the JSON
 **It does not block your merges by default**, and that is a considered choice rather than a timid one. A pull request whose suite was already green — documentation, or a feature whose new tests also pass on the old code — maps as *vacuous*, and the reading list is the whole diff. True, useful to know, and a terrible reason to stop a merge. Read the comments for a week, find out which of your pull requests actually carry a failing check, and then turn the gate on:
 
 ```yaml
-      - uses: angelnicolasc/warrant@v0.1.0
+      - uses: angelnicolasc/warrant@v0.1.1
         with:
           strict: true
           min-coverage: 40
@@ -288,7 +292,7 @@ With `strict`, the gate is raised *after* the comment is posted, so a finding al
 
 Everything is optional: `proof`, `against`, `strict`, `min-coverage`, `jobs`, `max-probes`, `timeout`, `comment`, `receipt`, `version`, `from-source`. With none of them set it maps the head of the pull request against its base, using the test command your repository already declares, and leaves a comment.
 
-`@v0` tracks the latest 0.x if you would rather not bump a pin; `@v0.1.0` is the one that reproduces. The last two inputs exist for the edges: `version` overrides which release runs, and `from-source` builds it on the runner for an architecture no release targets — minutes rather than seconds, which is why it is asked for rather than fallen into.
+`@v0` tracks the latest 0.x if you would rather not bump a pin; `@v0.1.1` is the one that reproduces. The last two inputs exist for the edges: `version` overrides which release runs, and `from-source` builds it on the runner for an architecture no release targets — minutes rather than seconds, which is why it is asked for rather than fallen into.
 
 ### Warrant as the harness
 
@@ -523,7 +527,7 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 
 **Two things a tag push taught that no amount of reading would have.** The repository's default workflow permission caps what a workflow may grant itself — a `permissions: contents: write` block can narrow that ceiling but never raise it, so the release built six targets and then could not publish them. And re-running a failed run does not pick up the corrected setting: the token is minted with the run, so the fix only takes on a fresh one.
 
-**Attestations are off, and not by choice.** The first tagged build made the point precisely: all six targets compiled, and all six then failed with *"Feature not available for user-owned private repositories."* Artifact Attestations require a public repository, so provenance arrives with publication and is a one-line change in `dist-workspace.toml` when it does. Until then the SHA-256 beside each archive is what a download can be checked against. Recorded here rather than quietly toggled, because a config that reads `false` next to a README paragraph about provenance is exactly the kind of drift this project is meant to notice.
+**Attestations cost a release to learn.** `v0.1.0` compiled all six targets and then failed all six with *"Feature not available for user-owned private repositories."* Artifact Attestations require a public repository; they are on from `v0.1.1`.
 
 **Rejected.** Hand-rolling the matrix, which is the same work with a smaller test surface. Publishing under the name `warrant` on crates.io, which has been taken since 2024 — the crate is `warrant-cli` and the binary it installs is `warrant`.
 
