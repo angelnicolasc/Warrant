@@ -1,18 +1,3 @@
-<!--
-  ─────────────────────────────────────────────────────────────────────
-  BEFORE PUBLISHING — fill every marker below with a measured value.
-  Never estimate, project, or fill with a plausible number.
-
-    [[RR]]        Rewrite Rate, per harness, from the pre-registered study
-    [[RR-DATE]]   Date the study ran
-    [[N-TASKS]]   Task-set size
-    [[OVERHEAD]]  Measured wall-clock overhead on Terminal-Bench 2.1
-    [[STUDY-URL]] Link to published trajectories
-
-  Delete this comment block once all markers are resolved.
-  ─────────────────────────────────────────────────────────────────────
--->
-
 <div align="center">
 
 # Warrant
@@ -47,6 +32,8 @@ $ warrant map --against HEAD
 <sub>Verbatim tool output, no configuration. Both fixtures on this page are checked on every build by <code>crates/warrant-cli/tests/end_to_end.rs</code>, so the ground truth is known rather than asserted.</sub>
 
 That is a reading list. `src/config.txt` has the suite standing behind it — revert either of its lines and the run goes red. The other eight lines are dead work, or a silent behavioural change nothing is testing, and *those* are the ones worth your attention.
+
+The same run [on two public repositories](#on-somebody-elses-code), nothing configured: **read 25 of 55** changed lines in one, **5 of 15** in the other.
 
 Then take the dead work off:
 
@@ -92,6 +79,12 @@ A tool that makes **your current agent** legible. It does not ask you to switch 
 It is not a verifier. There is no silver bullet for coding-agent verification ([arXiv 2606.26300](https://arxiv.org/pdf/2606.26300)), and the sound approach is to layer imperfect methods and report honestly what each one covers. **Warrant reports coverage, never correctness** — and the distinction is load-bearing enough that every receipt it issues states it in writing.
 
 Read the direction of the claim carefully, because it is the whole design. *Proven* means the declared proof depends on it, not that it is right — necessity is not sufficiency. *Unproven* means the suite says nothing about it, not that it is wrong. What Warrant can state without qualification is which part of a diff has a test behind it, and that is exactly what it prints.
+
+### What it asks of you: a check that fails first
+
+Warrant measures a change against a proof that did not hold before it. A bug with a reproduction. A task defined by a red suite. An agent handed something to make pass. That is the shape of the work it is for.
+
+Where a suite was green before the change and green after, Warrant says so — `vacuous` — and reports the whole diff as unread. Not a limitation being confessed: a suite that passed without the change does not stand behind it, and every number that says otherwise is measuring something else.
 
 ## Install
 
@@ -214,6 +207,19 @@ What you actually wait on is *rounds*, not probes: candidates at the same level 
 
 The trade is a third more compute for a fifth to a third less time. On a suite that runs in milliseconds it inverts and the pool loses to its own setup, which is what `--jobs 1` is for.
 
+### On somebody else's code
+
+Two real fixes from two public repositories, each mapped against the state an agent would have been handed — the regression test present and failing. The proof is whatever test command the repository already declares; nothing was configured.
+
+| | changed | reading list | probes | suite | map |
+|---|--:|---|--:|--:|--:|
+| [`spf13/cast`](https://github.com/spf13/cast) · `fa4ea64` | 55 lines | **read 25** | 45 | 0.7 s | 57 s |
+| [`pallets/itsdangerous`](https://github.com/pallets/itsdangerous) · `7f4dcf8` | 15 lines | **read 5** | 14 | 3.2 s | 22 s |
+
+The `itsdangerous` fix is twelve lines of code and a three-line changelog entry. Ten of the twelve are load-bearing; the changelog is not, and neither are the other two. That is the whole product in one row.
+
+Both maps are identical at `--jobs 1` and `--jobs 4`, across three runs each — the pool changes the schedule, never the answer.
+
 ## Commands
 
 | | |
@@ -269,7 +275,7 @@ The comment it leaves is the reading list, edited in place on every push rather 
 
 The whole run is **one search**. Three renderings — the step summary, the JSON the action reads its outputs from, and that comment — all come off the same map, because a second rendering that cost a second search would cost another full pass over your suite.
 
-**It does not block your merges by default**, and that is a considered choice rather than a timid one. A documentation-only pull request maps as *vacuous* — the suite passed before it and passed after it, so it proves nothing about the change — which is a true statement and a terrible reason to stop a merge. Read the comments for a week, find out what your repository's numbers actually look like, and then turn the gate on:
+**It does not block your merges by default**, and that is a considered choice rather than a timid one. A pull request whose suite was already green — documentation, or a feature whose new tests also pass on the old code — maps as *vacuous*, and the reading list is the whole diff. True, useful to know, and a terrible reason to stop a merge. Read the comments for a week, find out which of your pull requests actually carry a failing check, and then turn the gate on:
 
 ```yaml
       - uses: angelnicolasc/warrant@v0.1.0
@@ -555,31 +561,18 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 - **Refactors and formatting changes read as unproven.** They usually are, relative to a behavioural proof. There is no AST-equivalence pass in this release, so a pure rename shows up in the unproven region alongside genuinely dead work.
 - **Isolation is directory-level.** Commands run as the invoking user; the network is neither restricted nor recorded, and syscalls are not observed. Every receipt states this per dimension rather than implying more (ADR-08).
 - **Redundant changes make the choice arbitrary.** When either of two hunks would satisfy the proof on its own, exactly one survives minimisation. The number stays honest — one hunk really is enough — but which one is not meaningful.
-- **Overhead is real.** Attestation costs one run of your existing test command per claim, and the necessity search costs O(log n) more. Measured wall-clock overhead on Terminal-Bench 2.1: `[[OVERHEAD]]`.
+- **Overhead is real.** A probe is one run of your existing test command, and the search costs O(log n) of them. On the two third-party repositories measured below, a map cost 14 and 45 probes — 22 s and 57 s of wall clock. That belongs in CI, not in front of a person.
 - **Executable bits are invisible on Windows.** A mode-only change is not observable there, and is recorded as such.
 - **The live vendor endpoints are the one untested edge.** Both transports are exercised end to end against a real HTTP server — headers, tool results, error bodies, retries, a whole session each — but this build was written without credentials for any vendor, so that last hop has been reasoned about rather than measured. `wrap` and `map`, which most people will use, involve no model at all.
 - **Checked replay needs a reproducible environment.** A tool result that varies between identical runs surfaces as a divergence rather than passing silently (ADR-05). That is the intended direction of failure, but it does mean a suite with genuinely nondeterministic output cannot be strictly replayed — `freeze` is what pins such a run down.
 
 ## The Rewrite Rate study
 
-**Rewrite Rate** — the share of green agent runs that turn red when the agent's test edits are reverted.
+**Rewrite Rate** — of the runs an agent finished green, the share that turn red when its test edits are reverted and nothing else is.
 
-> **Not yet run.** The table below is a shape, not a result. Every value is a placeholder, and no number will be written into it that was not measured.
+Nobody has measured this. The method is [registered in full](./STUDY.md) — task set, agents, counting rule, exclusions, and what a negative result looks like — published before any data is collected, because the tool's value depends on the number and the tool's author is the one measuring it.
 
-The methodology, task set and counting rule will be published *before* the study runs, and the results published unchanged. The tool's value depends on this number, and the tool's author is the one measuring it; pre-registration is the only thing that makes it worth reading.
-
-<div align="center">
-
-| Harness | Rewrite Rate | Gutted assertions | Widened tolerances | Skips | Regenerated snapshots |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Claude Code | `[[RR]]` | — | — | — | — |
-| Codex | `[[RR]]` | — | — | — | — |
-| Cursor | `[[RR]]` | — | — | — | — |
-| opencode | `[[RR]]` | — | — | — | — |
-
-<sub>`[[N-TASKS]]` tasks · measured `[[RR-DATE]]` · <a href="[[STUDY-URL]]">trajectories</a></sub>
-
-</div>
+**A Rewrite Rate near zero would mean this project's headline is wrong.** That result gets published on the same terms as any other.
 
 ---
 
