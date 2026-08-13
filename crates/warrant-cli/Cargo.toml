@@ -13,6 +13,7 @@ name = "warrant"
 path = "src/main.rs"
 
 [dependencies]
+warrant-agent.workspace = true
 warrant-attest.workspace = true
 warrant-cell.workspace = true
 warrant-core.workspace = true

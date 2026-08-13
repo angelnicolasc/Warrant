@@ -49,6 +49,13 @@ pub enum EntryKind {
     NecessityMapped,
     /// A signed receipt was issued.
     ReceiptIssued,
+    /// What git history looked like at a moment, so a later rewrite is
+    /// detectable.
+    ///
+    /// Deliberately its own kind. Folding it into `RunStarted` would mean two
+    /// unrelated payload shapes sharing a label, and anything reading the log
+    /// for run headers would find repository state instead.
+    RepoState,
     /// Repository history stopped matching what the ledger recorded.
     RepoDiverged,
     /// A claim that failed, kept with its evidence so it is not re-attempted.
@@ -76,6 +83,7 @@ impl EntryKind {
             EntryKind::Attested => "attested",
             EntryKind::NecessityMapped => "necessity_mapped",
             EntryKind::ReceiptIssued => "receipt_issued",
+            EntryKind::RepoState => "repo_state",
             EntryKind::RepoDiverged => "repo_diverged",
             EntryKind::Refutation => "refutation",
             EntryKind::Note => "note",
@@ -190,6 +198,7 @@ mod tests {
             EntryKind::Attested,
             EntryKind::NecessityMapped,
             EntryKind::ReceiptIssued,
+            EntryKind::RepoState,
             EntryKind::RepoDiverged,
             EntryKind::Refutation,
             EntryKind::Note,

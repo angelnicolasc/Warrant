@@ -17,6 +17,7 @@
 pub mod anthropic;
 pub mod attempt;
 pub mod error;
+pub mod forensics;
 pub mod policy;
 pub mod provider;
 pub mod session;
@@ -25,6 +26,10 @@ pub mod workspace;
 
 pub use attempt::{Adjudication, Attempt, AttemptConfig, BestOfN, adjudicate};
 pub use error::{AgentError, Result};
+pub use forensics::{
+    Bisection, Expectation, Fixture, Refutation, Reproduction, RunRecord, bisect, refutations,
+    replay_prefix,
+};
 pub use policy::{ApproveAll, ApproveWithin, Approver, BlastRadius, Decision, Policy};
 pub use provider::{
     ContentBlock, Message, ModelRequest, ModelResponse, Provider, RecordedTurn, ReplayProvider,

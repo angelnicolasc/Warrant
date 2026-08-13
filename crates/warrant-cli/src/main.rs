@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod agentic;
 mod pipeline;
 mod render;
 mod repo;
@@ -71,6 +72,76 @@ enum Command {
         #[command(flatten)]
         mapping: MappingOptions,
     },
+
+    /// Drive a model against this repository, under a claim it declares itself.
+    ///
+    /// Needs ANTHROPIC_API_KEY. `warrant wrap` does not, and works with the
+    /// agent you already have configured.
+    Run {
+        /// What to do.
+        task: String,
+
+        #[command(flatten)]
+        agent: agentic::AgentOptions,
+
+        /// Where to write the receipt.
+        #[arg(long, value_name = "PATH")]
+        receipt: Option<PathBuf>,
+
+        /// Exit non-zero on a finding.
+        #[arg(long)]
+        strict: bool,
+    },
+
+    /// Run several attempts at one claim and keep only the proven one.
+    #[command(name = "do")]
+    BestOfN {
+        /// What to do.
+        task: String,
+
+        /// The proof every attempt is judged by. Required: without a shared
+        /// proof the attempts cannot be compared.
+        #[arg(long, value_name = "EXPR")]
+        proof: String,
+
+        /// How many attempts to run.
+        #[arg(long, default_value_t = 5, value_name = "N")]
+        attempts: u32,
+
+        /// Put the winning attempt into the working tree.
+        #[arg(long)]
+        apply: bool,
+
+        #[command(flatten)]
+        agent: agentic::AgentOptions,
+
+        /// Exit non-zero if nothing was proven.
+        #[arg(long)]
+        strict: bool,
+    },
+
+    /// Find the turn a recorded run stopped satisfying a proof.
+    Bisect {
+        /// The proof to search against.
+        #[arg(long, value_name = "EXPR")]
+        proof: String,
+    },
+
+    /// Turn the recorded run into a replayable fixture.
+    Freeze {
+        /// Where to write it.
+        #[arg(long, short, default_value = "warrant-fixture.json", value_name = "PATH")]
+        out: PathBuf,
+    },
+
+    /// Check that a frozen run still reproduces.
+    Replay {
+        /// The fixture.
+        path: PathBuf,
+    },
+
+    /// List the claims that failed here, with their evidence.
+    Refutations,
 
     /// Compile a proof and show exactly what it will run.
     Proof {
@@ -163,6 +234,16 @@ fn run() -> Result<ExitCode> {
             cmd_wrap(&root, &harness, &args, &mapping, &glyphs)
         }
         Command::Map { against, mapping } => cmd_map(&root, &against, &mapping, &glyphs),
+        Command::Run { task, agent, receipt, strict } => {
+            agentic::run(&root, &task, &agent, receipt.as_deref(), strict, &glyphs)
+        }
+        Command::BestOfN { task, proof, attempts, apply, agent, strict } => {
+            agentic::best_of_n(&root, &task, &proof, attempts, &agent, apply, strict, &glyphs)
+        }
+        Command::Bisect { proof } => agentic::bisect_run(&root, &proof, &glyphs),
+        Command::Freeze { out } => agentic::freeze(&root, &out, &glyphs),
+        Command::Replay { path } => agentic::replay(&root, &path, &glyphs),
+        Command::Refutations => agentic::list_refutations(&root, &glyphs),
         Command::Proof { expression } => cmd_proof(&root, expression.as_deref()),
         Command::Log { verify, diverged, limit } => {
             cmd_log(&root, verify, diverged, limit, &glyphs)
@@ -186,7 +267,7 @@ fn cmd_wrap(
         &serde_json::json!({ "harness": harness, "args": args, "root": root.to_string_lossy() }),
         now_ms(),
     )?;
-    record_git_state(&ledger, root, EntryKind::RunStarted)?;
+    record_git_state(&ledger, root, "start")?;
 
     // The agent works in the operator's actual repository. That is what they
     // asked for, and the pre-image is captured before it starts.
@@ -241,7 +322,7 @@ fn cmd_wrap(
     agent_cell.restore(after.as_snapshot())?;
     let outcome = outcome?;
 
-    record_git_state(&ledger, root, EntryKind::RunFinished)?;
+    record_git_state(&ledger, root, "finish")?;
     ledger.append_json(
         EntryKind::RunFinished,
         &serde_json::json!({ "outcome": outcome.map.outcome }),
@@ -272,7 +353,7 @@ fn cmd_map(
         &serde_json::json!({ "mode": "map", "against": against }),
         now_ms(),
     )?;
-    record_git_state(&ledger, root, EntryKind::RunStarted)?;
+    record_git_state(&ledger, root, "start")?;
 
     // A detached worktree is the cheapest exact checkout of a reference that
     // does not disturb the tree the operator is standing in.
@@ -395,7 +476,7 @@ fn report_divergence(root: &std::path::Path, ledger: &Ledger, glyphs: &Glyphs) -
 
     let mut findings = Vec::new();
     for entry in ledger.entries()? {
-        if !matches!(entry.kind, EntryKind::RunStarted | EntryKind::RunFinished) {
+        if entry.kind != EntryKind::RepoState {
             continue;
         }
         let Ok(state) = ledger.payload_json::<serde_json::Value>(&entry) else { continue };

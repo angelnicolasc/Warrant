@@ -1920,6 +1920,7 @@ name = "warrant-agent"
 version = "0.1.0"
 dependencies = [
  "globset",
+ "hex",
  "serde",
  "serde_json",
  "tempfile",
@@ -1974,6 +1975,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "warrant-agent",
  "warrant-attest",
  "warrant-cell",
  "warrant-core",

@@ -144,24 +144,57 @@ pub fn execute(
         ledger.append_json(EntryKind::Refutation, &map, now_ms())?;
     }
 
-    let mut run = RunSummary::between(diff.pre_root, diff.post_root);
-    if let Some(task) = &request.task {
-        run = run.with_task(task.clone());
+    let receipt = issue_receipt(
+        &map,
+        &proof_source,
+        proof_defaulted,
+        request.isolation,
+        request.task.clone(),
+        request.harness.clone(),
+        ledger,
+    )?;
+
+    Ok(MapResult { map, receipt, proof_source, proof_defaulted })
+}
+
+/// Sign a map into a receipt and record that it was issued.
+///
+/// Separated from `execute` because `warrant run` reaches the same point by a
+/// different route: several claims, each with its own map, rather than one
+/// map over a whole delta.
+pub fn issue_receipt(
+    map: &NecessityMap,
+    proof_source: &str,
+    proof_defaulted: bool,
+    isolation: IsolationReport,
+    task: Option<String>,
+    harness: Option<String>,
+    ledger: &Ledger,
+) -> Result<ReceiptFile> {
+    let predicate = Predicate::compile(proof_source)
+        .with_context(|| format!("compiling the proof `{proof_source}`"))?;
+
+    let mut run = RunSummary::between(map.pre_root, map.post_root);
+    if let Some(task) = task {
+        run = run.with_task(task);
     }
-    if let Some(harness) = &request.harness {
-        run = run.with_harness(harness.clone());
+    if let Some(harness) = harness {
+        run = run.with_harness(harness);
+    }
+    if let Some(claim) = map.claim {
+        run = run.with_claim(claim);
     }
 
     let statement = Statement::from_map(
-        &map,
+        map,
         ProofSummary {
             predicate: predicate.hash(),
-            source: proof_source.clone(),
+            source: proof_source.to_owned(),
             tier: ProofTier::Unit,
             commands: predicate.commands(),
             defaulted: proof_defaulted,
         },
-        request.isolation,
+        isolation,
         run,
         ledger.checkpoint()?,
         now_ms(),
@@ -170,8 +203,7 @@ pub fn execute(
     let identity = SigningIdentity::load_or_create(warrant_receipt::key_path(ledger.root()))?;
     let receipt = ReceiptFile::issue(&statement, &identity);
     ledger.append(EntryKind::ReceiptIssued, receipt.to_json()?.as_bytes(), now_ms())?;
-
-    Ok(MapResult { map, receipt, proof_source, proof_defaulted })
+    Ok(receipt)
 }
 
 /// Record what git currently believes, so a later rewrite is detectable.
@@ -179,15 +211,20 @@ pub fn execute(
 /// Warrant treats git as an output. This is the entry that makes a force-push
 /// visible: the commits reachable at this moment, written somewhere a
 /// `git push --force` cannot reach.
-pub fn record_git_state(ledger: &Ledger, root: &Path, kind: EntryKind) -> Result<()> {
+///
+/// It has its own entry kind. Writing it as a `RunStarted` — which an earlier
+/// version did — meant two unrelated payload shapes shared a label, and
+/// anything reading the log for a run header found repository state instead.
+pub fn record_git_state(ledger: &Ledger, root: &Path, phase: &str) -> Result<()> {
     if !crate::repo::is_git_repo(root) {
         return Ok(());
     }
     let state = serde_json::json!({
+        "phase": phase,
         "head": crate::repo::head_commit(root),
         "recent": crate::repo::recent_commits(root, 32),
     });
-    ledger.append_json(kind, &state, now_ms())?;
+    ledger.append_json(EntryKind::RepoState, &state, now_ms())?;
     Ok(())
 }
 

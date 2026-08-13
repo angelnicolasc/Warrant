@@ -18,7 +18,11 @@
 use serde::{Deserialize, Serialize};
 
 /// Limits applied to every tool call.
-#[derive(Clone, Debug)]
+///
+/// Serialisable because it is part of what a run *was*. A replay under a
+/// different policy is a different run: a tool refused in one and permitted in
+/// the other produces a different conversation from that point on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Policy {
     /// Whether the agent may modify the cell at all.
     pub allow_writes: bool,

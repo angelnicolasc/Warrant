@@ -111,8 +111,13 @@ impl SessionConfig {
             budget: Budget::UNLIMITED,
             stuck_patience: 5,
             prune_patience: None,
-            probe_root: root.join("probes"),
-            delegate_root: root.join("delegates"),
+            // Under `.warrant/`, which every snapshot excludes unconditionally.
+            // Probe and subagent cells are working artefacts, and a caller who
+            // rooted them somewhere a snapshot could see would find them
+            // counted as the agent's own changes — silently, and only in the
+            // tree hash.
+            probe_root: root.join(".warrant").join("probes"),
+            delegate_root: root.join(".warrant").join("delegates"),
             max_delegation_depth: 2,
         }
     }
@@ -274,7 +279,24 @@ impl<'a> Session<'a> {
         self.messages.push(Message::user(vec![ContentBlock::text(task)]));
         self.workspace.ledger().append_json(
             EntryKind::RunStarted,
-            &json!({ "task": task, "model": self.config.model, "depth": self.depth }),
+            // The policy goes into the header because it is part of what the
+            // run was. Replaying under a different one produces a different
+            // conversation the moment a tool is refused in one and not the
+            // other.
+            &json!({
+                "task": task,
+                "model": self.config.model,
+                "depth": self.depth,
+                "policy": self.workspace.policy(),
+            }),
+            now_ms(),
+        )?;
+        // The starting tree goes in too, so the run is self-describing: a
+        // reader with only the record can rebuild the world it happened in.
+        // `bisect` and `freeze` are both built on that.
+        self.workspace.ledger().append_json(
+            EntryKind::CellSnapshot,
+            self.workspace.origin(),
             now_ms(),
         )?;
 

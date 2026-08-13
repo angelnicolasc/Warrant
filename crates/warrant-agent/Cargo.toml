@@ -17,6 +17,7 @@ warrant-ledger.workspace = true
 warrant-necessity.workspace = true
 
 globset.workspace = true
+hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
