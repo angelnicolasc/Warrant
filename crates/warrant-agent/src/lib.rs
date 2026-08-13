@@ -46,6 +46,8 @@ use std::sync::{Arc, Mutex};
 use warrant_cell::{Cell, WorkspaceCell};
 use warrant_diff::{ContentStore, ScanOptions, Snapshot};
 
+pub use warrant_necessity::default_parallelism;
+
 /// Scan options for a cell that lives inside the repository it works on.
 ///
 /// Ancestor ignore files are skipped: the repository's own `.gitignore`
@@ -69,6 +71,22 @@ pub fn probe_cell(
     let mut cell = WorkspaceCell::adopt(root, store, cell_scan_options())?;
     cell.restore(baseline)?;
     Ok(Arc::new(Mutex::new(cell)))
+}
+
+/// Build `count` cells holding `baseline`, for probing concurrently.
+///
+/// A probe rewrites the filesystem, so running two at once needs two cells
+/// rather than two threads. They are cheap: the content store is shared, so a
+/// second cell costs one materialisation and no extra bytes.
+pub fn probe_cells(
+    root: &Path,
+    baseline: &Snapshot,
+    store: Arc<dyn ContentStore>,
+    count: usize,
+) -> Result<Vec<Arc<Mutex<dyn Cell>>>> {
+    (0..count.max(1))
+        .map(|index| probe_cell(&root.join(format!("cell-{index}")), baseline, Arc::clone(&store)))
+        .collect()
 }
 
 #[cfg(test)]

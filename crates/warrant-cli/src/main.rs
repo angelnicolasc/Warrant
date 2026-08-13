@@ -188,6 +188,11 @@ struct MappingOptions {
     #[arg(long, value_name = "N")]
     max_probes: Option<u32>,
 
+    /// How many probes to run at once. Defaults to half the machine, capped
+    /// at four. `--jobs 1` maps sequentially.
+    #[arg(long, value_name = "N")]
+    jobs: Option<usize>,
+
     /// Per-command timeout inside a probe, in seconds.
     #[arg(long, value_name = "SECONDS")]
     timeout: Option<u64>,
@@ -312,6 +317,7 @@ fn cmd_wrap(
         after: after.as_snapshot().clone(),
         proof: options.proof.clone(),
         max_probes: options.max_probes,
+        parallelism: options.jobs,
         timeout_ms: options.timeout.map(|s| s * 1000),
         task: (!args.is_empty()).then(|| args.join(" ")),
         harness: Some(harness.to_owned()),
@@ -387,6 +393,7 @@ fn cmd_map(
         after,
         proof: options.proof.clone(),
         max_probes: options.max_probes,
+        parallelism: options.jobs,
         timeout_ms: options.timeout.map(|s| s * 1000),
         task: Some(format!("working tree against {against}")),
         harness: None,

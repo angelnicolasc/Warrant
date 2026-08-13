@@ -84,6 +84,33 @@ where
     T: Copy + Ord,
     F: FnMut(&[T]) -> Result<bool, E>,
 {
+    let mut one_at_a_time =
+        |batch: &[Vec<T>]| -> Result<Vec<bool>, E> { batch.iter().map(|s| passes(s)).collect() };
+    ddmin_wide(universe, &mut one_at_a_time, budget, 1)
+}
+
+/// The same search, evaluating up to `width` candidates per round.
+///
+/// The answer is identical: within a round the lowest-index candidate that
+/// passes is the one taken, which is exactly what a sequential pass with an
+/// early exit would have chosen. What changes is *rounds*, and a round is one
+/// run of the repository's test suite in wall-clock terms.
+///
+/// The trade is deliberate. A wide round runs candidates the sequential
+/// version would have skipped after an early hit, so it spends **more probes
+/// to spend less time**. On a suite that takes a minute, that is the right
+/// direction; `width = 1` reproduces the frugal behaviour exactly.
+pub fn ddmin_wide<T, E, F>(
+    universe: &[T],
+    probe_batch: &mut F,
+    budget: &mut ProbeBudget,
+    width: usize,
+) -> Result<Vec<T>, E>
+where
+    T: Copy + Ord,
+    F: FnMut(&[Vec<T>]) -> Result<Vec<bool>, E>,
+{
+    let width = width.max(1);
     let mut current = universe.to_vec();
     let mut granularity = 2usize;
 
@@ -92,17 +119,10 @@ where
         let mut progressed = false;
 
         // Can the whole thing be replaced by one of its parts?
-        for chunk in &chunks {
-            if budget.exhausted() {
-                break;
-            }
-            budget.spend();
-            if passes(chunk)? {
-                current = chunk.clone();
-                granularity = 2;
-                progressed = true;
-                break;
-            }
+        if let Some(hit) = first_passing(&chunks, probe_batch, budget, width)? {
+            current = hit;
+            granularity = 2;
+            progressed = true;
         }
         if progressed {
             continue;
@@ -111,23 +131,19 @@ where
         // Can any single part be dropped? At granularity two the complements
         // are the chunks, which were just tested, so this starts at three.
         if granularity > 2 {
-            for chunk in &chunks {
-                if budget.exhausted() {
-                    break;
-                }
-                let excluded: BTreeSet<T> = chunk.iter().copied().collect();
-                let complement: Vec<T> =
-                    current.iter().copied().filter(|x| !excluded.contains(x)).collect();
-                if complement.is_empty() {
-                    continue;
-                }
-                budget.spend();
-                if passes(&complement)? {
-                    current = complement;
-                    granularity = granularity.saturating_sub(1).max(2);
-                    progressed = true;
-                    break;
-                }
+            let complements: Vec<Vec<T>> = chunks
+                .iter()
+                .map(|chunk| {
+                    let excluded: BTreeSet<T> = chunk.iter().copied().collect();
+                    current.iter().copied().filter(|x| !excluded.contains(x)).collect::<Vec<T>>()
+                })
+                .filter(|complement| !complement.is_empty())
+                .collect();
+
+            if let Some(hit) = first_passing(&complements, probe_batch, budget, width)? {
+                current = hit;
+                granularity = granularity.saturating_sub(1).max(2);
+                progressed = true;
             }
         }
         if progressed {
@@ -141,6 +157,35 @@ where
     }
 
     Ok(current)
+}
+
+/// Evaluate candidates `width` at a time and return the first that passes.
+///
+/// "First" is by position in `candidates`, not by which round finished first,
+/// so the result does not depend on scheduling.
+fn first_passing<T, E, F>(
+    candidates: &[Vec<T>],
+    probe_batch: &mut F,
+    budget: &mut ProbeBudget,
+    width: usize,
+) -> Result<Option<Vec<T>>, E>
+where
+    T: Copy + Ord,
+    F: FnMut(&[Vec<T>]) -> Result<Vec<bool>, E>,
+{
+    for round in candidates.chunks(width) {
+        if budget.exhausted() {
+            return Ok(None);
+        }
+        for _ in round {
+            budget.spend();
+        }
+        let results = probe_batch(round)?;
+        if let Some(index) = results.iter().position(|passed| *passed) {
+            return Ok(Some(round[index].clone()));
+        }
+    }
+    Ok(None)
 }
 
 /// What a minimality check found.
@@ -173,28 +218,74 @@ where
     T: Copy + Ord,
     F: FnMut(&[T]) -> Result<bool, E>,
 {
+    let mut one_at_a_time =
+        |batch: &[Vec<T>]| -> Result<Vec<bool>, E> { batch.iter().map(|s| passes(s)).collect() };
+    confirm_minimal_wide(subset, &mut one_at_a_time, budget, 1)
+}
+
+/// The same confirmation, evaluating up to `width` candidates per round.
+///
+/// The usual case is that nothing needs dropping — `ddmin` already returned a
+/// 1-minimal set — and the sequential version still pays one probe per
+/// element to find that out. A wide round asks the whole question at once, so
+/// the common case costs **one round instead of |S|**.
+pub fn confirm_minimal_wide<T, E, F>(
+    subset: &[T],
+    probe_batch: &mut F,
+    budget: &mut ProbeBudget,
+    width: usize,
+) -> Result<Minimality<T>, E>
+where
+    T: Copy + Ord,
+    F: FnMut(&[Vec<T>]) -> Result<Vec<bool>, E>,
+{
+    let width = width.max(1);
     let mut current = subset.to_vec();
     let mut dropped = Vec::new();
-    let mut index = 0usize;
 
-    while index < current.len() {
+    loop {
+        if current.is_empty() {
+            return Ok(Minimality { subset: current, dropped, complete: true });
+        }
         if budget.exhausted() {
             return Ok(Minimality { subset: current, dropped, complete: false });
         }
-        let mut without = current.clone();
-        let candidate = without.remove(index);
 
-        budget.spend();
-        if passes(&without)? {
-            // The proof survives without it, so it was never load-bearing.
-            dropped.push(candidate);
-            current = without;
-        } else {
-            index += 1;
+        // Every element, left out in turn.
+        let candidates: Vec<Vec<T>> = (0..current.len())
+            .map(|index| {
+                let mut without = current.clone();
+                without.remove(index);
+                without
+            })
+            .collect();
+
+        let mut survivor = None;
+        for (offset, round) in candidates.chunks(width).enumerate() {
+            if budget.exhausted() {
+                return Ok(Minimality { subset: current, dropped, complete: false });
+            }
+            for _ in round {
+                budget.spend();
+            }
+            let results = probe_batch(round)?;
+            if let Some(index) = results.iter().position(|passed| *passed) {
+                survivor = Some(offset * width + index);
+                break;
+            }
+        }
+
+        match survivor {
+            // Something was not load-bearing after all. Drop the
+            // lowest-indexed one and ask again, because removing it can change
+            // the answer for the rest.
+            Some(index) => {
+                dropped.push(current.remove(index));
+            }
+            // Nothing can be removed: every element is individually necessary.
+            None => return Ok(Minimality { subset: current, dropped, complete: true }),
         }
     }
-
-    Ok(Minimality { subset: current, dropped, complete: true })
 }
 
 #[cfg(test)]
@@ -361,6 +452,82 @@ mod tests {
         assert_eq!(budget.used(), 0);
     }
 
+    /// Turn a single-candidate oracle into a batch one, so the wide and narrow
+    /// paths can be compared against the same requirement.
+    fn batched(required: Vec<u32>) -> impl FnMut(&[Vec<u32>]) -> Result<Vec<bool>, Infallible> {
+        move |batch: &[Vec<u32>]| {
+            Ok(batch.iter().map(|subset| required.iter().all(|r| subset.contains(r))).collect())
+        }
+    }
+
+    /// The whole basis for running probes concurrently: a wider round must not
+    /// change the answer, only how long it takes to reach it.
+    #[test]
+    fn width_changes_the_schedule_and_never_the_answer() {
+        let items = universe(40);
+        for required in [vec![7u32], vec![3, 9, 30], vec![0, 39], Vec::new()] {
+            let mut narrow_budget = ProbeBudget::unlimited();
+            let narrow =
+                ddmin_wide(&items, &mut batched(required.clone()), &mut narrow_budget, 1).unwrap();
+            let narrow = confirm_minimal_wide(
+                &narrow,
+                &mut batched(required.clone()),
+                &mut narrow_budget,
+                1,
+            )
+            .unwrap();
+
+            for width in [2usize, 4, 8, 64] {
+                let mut budget = ProbeBudget::unlimited();
+                let found =
+                    ddmin_wide(&items, &mut batched(required.clone()), &mut budget, width).unwrap();
+                let confirmed = confirm_minimal_wide(
+                    &found,
+                    &mut batched(required.clone()),
+                    &mut budget,
+                    width,
+                )
+                .unwrap();
+
+                let mut a = narrow.subset.clone();
+                let mut b = confirmed.subset.clone();
+                a.sort_unstable();
+                b.sort_unstable();
+                assert_eq!(a, b, "width {width} changed the answer for {required:?}");
+            }
+        }
+    }
+
+    /// The trade being made, stated as a test so it cannot drift: a wide round
+    /// spends more probes and fewer rounds. On a suite that takes a minute,
+    /// rounds are what the person is waiting for.
+    #[test]
+    fn a_wide_confirmation_costs_one_round_instead_of_one_per_element() {
+        let required: Vec<u32> = (0..12).collect();
+
+        let mut rounds = 0;
+        let mut counting = |batch: &[Vec<u32>]| -> Result<Vec<bool>, Infallible> {
+            rounds += 1;
+            Ok(batch.iter().map(|s| required.iter().all(|r| s.contains(r))).collect())
+        };
+        let mut budget = ProbeBudget::unlimited();
+        let wide = confirm_minimal_wide(&required, &mut counting, &mut budget, 16).unwrap();
+
+        assert!(wide.complete);
+        assert_eq!(wide.subset.len(), 12, "nothing should be dropped");
+        assert_eq!(rounds, 1, "an already-minimal set should take a single round");
+        assert_eq!(budget.used(), 12, "and still account for every probe it ran");
+    }
+
+    #[test]
+    fn a_budget_still_bounds_a_wide_search() {
+        let items = universe(256);
+        let mut budget = ProbeBudget::limited(6);
+        let found = ddmin_wide(&items, &mut batched(vec![200]), &mut budget, 8).unwrap();
+        assert!(budget.exhausted());
+        assert!(found.contains(&200), "a bounded search is coarser, never wrong");
+    }
+
     proptest::proptest! {
         /// Whatever the required set, the search must find it and the
         /// confirmation must reduce to exactly it.
@@ -374,6 +541,28 @@ mod tests {
 
             let found = ddmin(&items, &mut requires(&required), &mut budget).unwrap();
             let confirmed = confirm_minimal(&found, &mut requires(&required), &mut budget).unwrap();
+
+            let mut subset = confirmed.subset;
+            subset.sort_unstable();
+            proptest::prop_assert_eq!(subset, required);
+        }
+
+        /// The same property, at every width. Scheduling must not be able to
+        /// change what a map reports.
+        #[test]
+        fn any_width_recovers_the_same_minimal_set(
+            required in proptest::collection::btree_set(0u32..24, 0..6),
+            width in 1usize..12,
+        ) {
+            let items = universe(24);
+            let required: Vec<u32> = required.into_iter().collect();
+            let mut budget = ProbeBudget::unlimited();
+
+            let found = ddmin_wide(&items, &mut batched(required.clone()), &mut budget, width)
+                .unwrap();
+            let confirmed =
+                confirm_minimal_wide(&found, &mut batched(required.clone()), &mut budget, width)
+                    .unwrap();
 
             let mut subset = confirmed.subset;
             subset.sort_unstable();

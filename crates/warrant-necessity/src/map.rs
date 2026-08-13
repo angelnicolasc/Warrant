@@ -125,7 +125,16 @@ pub struct NecessityMap {
     /// Per-file breakdown, sorted by path.
     pub files: Vec<FileVerdict>,
     /// How many probes the search actually ran.
+    ///
+    /// A probe is one run of the repository's test command, so this is the
+    /// compute the map cost.
     pub probes: u32,
+    /// How many sequential rounds those probes took.
+    ///
+    /// This is the number a person waits on: probes within a round run
+    /// concurrently. Reporting both keeps the trade visible — running wide
+    /// spends more probes to spend less time.
+    pub rounds: u32,
     /// Whether the probe budget ran out before the search finished.
     pub budget_exhausted: bool,
     /// Whether every load-bearing hunk was individually re-checked.
@@ -157,6 +166,7 @@ impl NecessityMap {
             hunk_coverage: Ratio::UNDEFINED,
             files: Vec::new(),
             probes: 0,
+            rounds: 0,
             budget_exhausted: false,
             minimality_confirmed: false,
             monotonicity_violations: Vec::new(),

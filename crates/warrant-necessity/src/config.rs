@@ -60,12 +60,23 @@ pub struct NecessityConfig {
     /// algorithm's invariant rather than on a probe, and that invariant is
     /// exactly the one flaky suites break.
     pub confirm_minimality: bool,
+    /// How many candidates may be evaluated at once.
+    ///
+    /// Probes at the same level of the search are independent, so this trades
+    /// probes for wall clock: a wide round runs candidates a sequential pass
+    /// would have skipped after an early hit. On a suite that takes a minute
+    /// that is the right trade, and the answer is identical either way.
+    ///
+    /// Capped at the number of cells the caller supplies.
+    pub parallelism: usize,
     /// How many times to evaluate the proof on the agent's result before
     /// trusting the answer.
     ///
-    /// Two by default: one extra test run to find out whether the proof is
-    /// stable enough to map at all. A proof that answers differently on
-    /// identical state is a finding in its own right.
+    /// One by default. A second is a whole extra suite run — a sixth of the
+    /// cost of a small map — spent to find out whether the suite is flaky. It
+    /// is worth paying deliberately rather than on every run, and the
+    /// confirmation pass reports contradictions anyway as monotonicity
+    /// violations, which is the same finding arriving later and for free.
     pub stability_probes: u32,
     /// Per-command timeout inside a probe.
     pub command_timeout_ms: Option<u64>,
@@ -78,7 +89,8 @@ impl Default for NecessityConfig {
             snapshot_patterns: DEFAULT_SNAPSHOT_PATTERNS.iter().map(|s| (*s).to_owned()).collect(),
             max_probes: None,
             confirm_minimality: true,
-            stability_probes: 2,
+            parallelism: default_parallelism(),
+            stability_probes: 1,
             command_timeout_ms: Some(10 * 60 * 1000),
         }
     }
@@ -100,9 +112,18 @@ impl NecessityConfig {
         self
     }
 
-    /// Skip the stability check, for suites already known to be deterministic.
-    pub fn without_stability_check(mut self) -> Self {
-        self.stability_probes = 1;
+    /// Re-check the proof on the agent's result before mapping.
+    ///
+    /// Costs one extra suite run and turns a flaky suite into a stated
+    /// finding rather than a noisy map.
+    pub fn with_stability_check(mut self) -> Self {
+        self.stability_probes = 2;
+        self
+    }
+
+    /// Evaluate one candidate at a time.
+    pub fn sequential(mut self) -> Self {
+        self.parallelism = 1;
         self
     }
 
@@ -113,6 +134,15 @@ impl NecessityConfig {
             snapshots: build_set(&self.snapshot_patterns)?,
         })
     }
+}
+
+/// How many probes to run at once when nothing says otherwise.
+///
+/// Capped well below the core count: each probe runs the repository's test
+/// command, and most suites already use several cores themselves. Taking the
+/// whole machine would make every probe slower and gain nothing.
+pub fn default_parallelism() -> usize {
+    std::thread::available_parallelism().map(|n| n.get().div_ceil(2)).unwrap_or(1).clamp(1, 4)
 }
 
 fn build_set(patterns: &[String]) -> Result<GlobSet> {

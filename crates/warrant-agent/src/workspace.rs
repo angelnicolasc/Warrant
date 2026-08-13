@@ -374,15 +374,19 @@ impl Workspace {
         let after = self.observe()?;
         let diff = OverlayDiff::between(&self.claim_baseline, &after, self.store.as_ref())?;
 
-        let probe_cell =
-            crate::probe_cell(probe_root, &self.claim_baseline, Arc::clone(&self.store))?;
         let config = NecessityConfig {
             command_timeout_ms: self.policy.command_timeout_ms,
             ..NecessityConfig::default()
         };
+        let cells = crate::probe_cells(
+            probe_root,
+            &self.claim_baseline,
+            Arc::clone(&self.store),
+            config.parallelism,
+        )?;
 
         let mut search = Search::new(
-            probe_cell,
+            cells,
             &self.claim_baseline,
             &after,
             &diff,
@@ -394,7 +398,7 @@ impl Workspace {
         .for_claim(active.claim.id);
         let map = search.run()?;
 
-        for record in search.commands() {
+        for record in &search.commands() {
             self.ledger.append_json(EntryKind::Probe, record, now_ms())?;
         }
         self.ledger.append_json(EntryKind::NecessityMapped, &map, now_ms())?;

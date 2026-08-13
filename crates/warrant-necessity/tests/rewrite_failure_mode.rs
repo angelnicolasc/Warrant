@@ -45,6 +45,17 @@ fn map_scenario(
     agent_edits: &[(&str, &str)],
     config: NecessityConfig,
 ) -> (NecessityMap, OverlayDiff) {
+    map_scenario_with_cells(before, agent_edits, config, 1)
+}
+
+/// As above, but with `cells` probe cells, so the same scenario can be mapped
+/// sequentially and concurrently and the two answers compared.
+fn map_scenario_with_cells(
+    before: &[(&str, &str)],
+    agent_edits: &[(&str, &str)],
+    config: NecessityConfig,
+    cells: usize,
+) -> (NecessityMap, OverlayDiff) {
     let source = tempfile::tempdir().unwrap();
     for (path, content) in before {
         write(source.path(), path, content);
@@ -69,10 +80,21 @@ fn map_scenario(
     let diff = OverlayDiff::between(pre.as_snapshot(), post.as_snapshot(), store.as_ref()).unwrap();
     let predicate = Predicate::compile(SUITE).unwrap();
     let attestor = Attestor::new().unwrap();
-    let shared: Arc<Mutex<dyn Cell>> = Arc::new(Mutex::new(cell));
+
+    let mut pool: Vec<Arc<Mutex<dyn Cell>>> = vec![Arc::new(Mutex::new(cell))];
+    for index in 1..cells.max(1) {
+        let extra = WorkspaceCell::fork_from(
+            source.path(),
+            workdir.path().join(format!("cell-{index}")),
+            Arc::clone(&store),
+            scan_options(),
+        )
+        .unwrap();
+        pool.push(Arc::new(Mutex::new(extra)));
+    }
 
     let mut search = Search::new(
-        shared,
+        pool,
         pre.as_snapshot(),
         post.as_snapshot(),
         &diff,
@@ -279,6 +301,50 @@ fn the_search_stays_logarithmic_as_scope_creep_grows() {
         map.probes < 21,
         "binary partitioning should beat checking each of 21 hunks, but used {}",
         map.probes
+    );
+}
+
+/// The pool is a wall-clock optimisation, and an optimisation that changed the
+/// verdict would be a bug rather than a speed-up. Same scenario, same proof,
+/// four cells instead of one: the map must be identical everywhere except in
+/// the two fields that describe what the search cost.
+#[test]
+fn a_pool_of_cells_changes_the_schedule_and_never_the_map() {
+    let mut before = failing_repository();
+    let mut edits: Vec<(&str, &str)> = vec![("src/config.txt", "timeout = 30\n")];
+    for i in 0..12 {
+        let path: &'static str = Box::leak(format!("docs/wide_{i}.txt").into_boxed_str());
+        before.push((path, "original\n"));
+        edits.push((path, "rewritten\n"));
+    }
+
+    let (sequential, _) =
+        map_scenario_with_cells(&before, &edits, NecessityConfig::default().sequential(), 1);
+    let (concurrent, diff) =
+        map_scenario_with_cells(&before, &edits, NecessityConfig::default(), 4);
+
+    assert_eq!(sequential.outcome, MapOutcome::Mapped);
+    assert_eq!(load_bearing_paths(&concurrent, &diff), ["src/config.txt"]);
+
+    // Compare everything by normalising away the cost, so a new field added to
+    // the map is compared too rather than silently skipped.
+    let normalise = |map: &NecessityMap| {
+        let mut m = map.clone();
+        m.probes = 0;
+        m.rounds = 0;
+        m
+    };
+    assert_eq!(normalise(&sequential), normalise(&concurrent), "the pool changed the answer");
+
+    assert!(
+        concurrent.rounds < sequential.rounds,
+        "four cells should need fewer rounds than one: {} vs {}",
+        concurrent.rounds,
+        sequential.rounds
+    );
+    assert!(
+        concurrent.probes >= sequential.probes,
+        "running wide trades probes for rounds, so it never runs fewer probes"
     );
 }
 

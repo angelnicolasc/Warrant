@@ -44,8 +44,11 @@ mod search;
 
 pub use config::{
     DEFAULT_SNAPSHOT_PATTERNS, DEFAULT_TEST_PATTERNS, NecessityConfig, PathClassifier,
+    default_parallelism,
 };
-pub use ddmin::{Minimality, ProbeBudget, confirm_minimal, ddmin};
+pub use ddmin::{
+    Minimality, ProbeBudget, confirm_minimal, confirm_minimal_wide, ddmin, ddmin_wide,
+};
 pub use error::{NecessityError, Result};
 pub use map::{FileVerdict, MapOutcome, NecessityMap};
 pub use search::Search;

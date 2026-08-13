@@ -31,6 +31,9 @@ pub struct MapRequest {
     pub proof: Option<String>,
     /// Ceiling on probes.
     pub max_probes: Option<u32>,
+    /// How many probes may run at once. `None` picks a default from the
+    /// machine.
+    pub parallelism: Option<usize>,
     /// Per-command timeout inside a probe.
     pub timeout_ms: Option<u64>,
     /// The task as stated.
@@ -103,29 +106,38 @@ pub fn execute(
     // restore and each one would pay for a full rebuild. Ancestor ignore files
     // are *not* consulted, because the repository's `.gitignore` excludes
     // `.warrant/` and this cell lives underneath it.
-    let probe_root = request.root.join(".warrant").join("probes").join(diff.post_root.short());
-    std::fs::create_dir_all(&probe_root)
-        .with_context(|| format!("creating the probe cell at {}", probe_root.display()))?;
-    let probe_scan = ScanOptions { use_parent_ignores: false, ..ScanOptions::default() };
-    let mut probe_cell = WorkspaceCell::adopt(&probe_root, Arc::clone(&blobs), probe_scan)?;
-    probe_cell.restore(&request.before)?;
-    ledger.append_json(
-        EntryKind::CellCreated,
-        &serde_json::json!({ "purpose": "necessity-probe", "id": probe_cell.id().to_string() }),
-        now_ms(),
-    )?;
+    let probes_root = request.root.join(".warrant").join("probes").join(diff.post_root.short());
 
     let defaults = NecessityConfig::default();
     let config = NecessityConfig {
         max_probes: request.max_probes,
         command_timeout_ms: request.timeout_ms.or(defaults.command_timeout_ms),
+        parallelism: request.parallelism.unwrap_or(defaults.parallelism),
         ..defaults
     };
 
+    // One cell per concurrent probe. A probe rewrites the filesystem, so two
+    // at once need two trees rather than two threads; the blob store is
+    // shared, so the second costs a materialisation and no extra bytes.
+    let mut cells: Vec<Arc<Mutex<dyn Cell>>> = Vec::with_capacity(config.parallelism);
+    for index in 0..config.parallelism.max(1) {
+        let probe_root = probes_root.join(format!("cell-{index}"));
+        std::fs::create_dir_all(&probe_root)
+            .with_context(|| format!("creating the probe cell at {}", probe_root.display()))?;
+        let probe_scan = ScanOptions { use_parent_ignores: false, ..ScanOptions::default() };
+        let mut probe_cell = WorkspaceCell::adopt(&probe_root, Arc::clone(&blobs), probe_scan)?;
+        probe_cell.restore(&request.before)?;
+        ledger.append_json(
+            EntryKind::CellCreated,
+            &serde_json::json!({ "purpose": "necessity-probe", "id": probe_cell.id().to_string() }),
+            now_ms(),
+        )?;
+        cells.push(Arc::new(Mutex::new(probe_cell)));
+    }
+
     let attestor = Attestor::new()?;
-    let shared: Arc<Mutex<dyn Cell>> = Arc::new(Mutex::new(probe_cell));
     let mut search = Search::new(
-        shared,
+        cells,
         &request.before,
         &request.after,
         &diff,
@@ -136,7 +148,7 @@ pub fn execute(
     );
     let map = search.run()?;
 
-    for record in search.commands() {
+    for record in &search.commands() {
         ledger.append_json(EntryKind::Probe, record, now_ms())?;
     }
     ledger.append_json(EntryKind::NecessityMapped, &map, now_ms())?;
