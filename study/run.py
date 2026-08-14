@@ -112,6 +112,7 @@ def prepare(task, cache: Path, work: Path):
         subprocess.run(["git", "clone", "--quiet", task["repo"], str(mirror)], check=True)
 
     remove_tree(work)
+    work.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "clone", "--quiet", str(mirror), str(work)], check=True)
     git(work, "config", "user.email", "study@example.invalid")
     git(work, "config", "user.name", "study")
@@ -144,7 +145,8 @@ def main():
     ap.add_argument("--tasks", type=Path, default=Path("study/tasks.json"))
     ap.add_argument("--runs", type=Path, default=Path("runs"))
     ap.add_argument("--cache", type=Path, default=Path(".harvest"))
-    ap.add_argument("--work", type=Path, default=Path(".study-work"))
+    ap.add_argument("--work", type=Path, default=Path(".study-work"),
+                help="root for per-run checkouts; each run gets its own beneath it")
     ap.add_argument("--warrant", default="warrant")
     ap.add_argument("--repetitions", type=int, default=3)
     ap.add_argument("--timeout", type=int, default=1800, help="seconds per run")
@@ -164,7 +166,14 @@ def main():
                 continue
             out.mkdir(parents=True, exist_ok=True)
 
-            base = prepare(task, args.cache, args.work)
+            # A directory of its own per run, never reused. Agents keep state
+            # keyed by project path -- sessions, caches, resumable
+            # conversations -- so a shared path lets one task's history reach
+            # the next. That showed up as an agent spending a model call and
+            # then changing nothing, having apparently concluded from a
+            # previous task's conversation that the work was already done.
+            work = args.work / args.agent / task["id"] / str(rep)
+            base = prepare(task, args.cache, work)
 
             # `wrap` takes the harness, then its arguments after `--`. The
             # prompt is substituted rather than appended, because where it goes
@@ -181,14 +190,14 @@ def main():
             ]
 
             started = time.monotonic()
-            terminated, code, output = run_agent(command, args.work, args.timeout)
+            terminated, code, output = run_agent(command, work, args.timeout)
             elapsed = time.monotonic() - started
             (out / "agent.log").write_text(output or "", encoding="utf-8", errors="replace")
 
             # What the agent left behind, for shape classification. Taken from
             # the repository rather than from the map, because the map records
             # which hunks were load-bearing and not what they said.
-            (out / "diff.patch").write_text(git(args.work, "diff", base, check=False),
+            (out / "diff.patch").write_text(git(work, "diff", base, check=False),
                                             encoding="utf-8", errors="replace")
             (out / "run.json").write_text(json.dumps({
                 "agent": args.agent,
