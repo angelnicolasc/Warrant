@@ -1,0 +1,559 @@
+{
+  "generated_by": "study/harvest.py",
+  "task_count": 33,
+  "rejected": {
+    "no test command detected": 121,
+    "parent is not green": 33,
+    "the tests pass on the unfixed code": 10,
+    "the author's own fix does not make it green": 4,
+    "FileNotFoundError while preparing": 4,
+    "RuntimeError while preparing": 2
+  },
+  "fingerprint": "blake2b:ee02cf85bdf681de63d60ed0e83429b2",
+  "tasks": [
+    {
+      "id": "afero-22177ff6",
+      "repo": "https://github.com/spf13/afero",
+      "fix": "22177ff6c4f5183fd7050c2d0d4c9dfd053afb67",
+      "base": "50ff6dac05133b42ffb8e620fe61eaebca0ccd87",
+      "parent": "7511d5e706648e0fd974ba6305ecd0aa30ede1c5",
+      "test_paths": [
+        "tarfs/tarfs_test.go"
+      ],
+      "source_paths": [
+        "tarfs/fs.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 29,
+      "suite_seconds": 10.25
+    },
+    {
+      "id": "afero-5c5e03d3",
+      "repo": "https://github.com/spf13/afero",
+      "fix": "5c5e03d31a90a3b98af0b953daaa93ef06fff6fa",
+      "base": "a85904d894486c83a8e83feae36c2fa78c0dee11",
+      "parent": "d50ec138c515286137aa95cff06c42facda08e92",
+      "test_paths": [
+        "memmap_test.go"
+      ],
+      "source_paths": [
+        "memmap.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 9,
+      "suite_seconds": 10.17
+    },
+    {
+      "id": "afero-768f1fb0",
+      "repo": "https://github.com/spf13/afero",
+      "fix": "768f1fb0e5535b77d90e44c531aacd652aabd96a",
+      "base": "3d591aefc016b97dea345742170460afd1c3d57e",
+      "parent": "eb71877fc01c7febbf4f4f8fc99c37f2b507b8a4",
+      "test_paths": [
+        "readonlyfs_test.go"
+      ],
+      "source_paths": [
+        "readonlyfs.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 4,
+      "suite_seconds": 10.25
+    },
+    {
+      "id": "afero-ecf3363d",
+      "repo": "https://github.com/spf13/afero",
+      "fix": "ecf3363d57ea86d39b373ddb388b701eb371600a",
+      "base": "3e85e84aaf4a60bbb78d7edbb42546fb1f78f9f3",
+      "parent": "a7e88fd602b025af2525d200ba2a0ff337ea5fa0",
+      "test_paths": [
+        "memmap_test.go"
+      ],
+      "source_paths": [
+        "memmap.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 19,
+      "suite_seconds": 10.17
+    },
+    {
+      "id": "cast-1b425f31",
+      "repo": "https://github.com/spf13/cast",
+      "fix": "1b425f3142c8c815d1af9725ee11fbc4cac86915",
+      "base": "b5200da30c53e8d6eef62c07e4308dac4ef434f2",
+      "parent": "a79ffed9a6a3da62453e90f35784fc2b8d1b390b",
+      "test_paths": [
+        "basic_test.go",
+        "indirect_test.go",
+        "time_test.go"
+      ],
+      "source_paths": [
+        "indirect.go",
+        "time.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 11,
+      "suite_seconds": 0.58
+    },
+    {
+      "id": "cast-9ffddd42",
+      "repo": "https://github.com/spf13/cast",
+      "fix": "9ffddd42bd84b02544a02732956ce53b114ea6e6",
+      "base": "56be799712594775c7e91237683bfd356a91a1bc",
+      "parent": "a6d26bd7411fd9ab84c716d810b9bcc525654771",
+      "test_paths": [
+        "basic_test.go",
+        "cast_test.go",
+        "number_test.go",
+        "time_test.go"
+      ],
+      "source_paths": [
+        "basic.go",
+        "number.go",
+        "time.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 22,
+      "suite_seconds": 0.64
+    },
+    {
+      "id": "cast-a6d26bd7",
+      "repo": "https://github.com/spf13/cast",
+      "fix": "a6d26bd7411fd9ab84c716d810b9bcc525654771",
+      "base": "b626c8e76b65325be7ea6cc538a6bc3ca5800812",
+      "parent": "633e5d09b710eccd12345ae716eeda1d5ba5cc93",
+      "test_paths": [
+        "alias_test.go"
+      ],
+      "source_paths": [
+        "alias.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 69,
+      "suite_seconds": 0.55
+    },
+    {
+      "id": "cast-fa4ea64d",
+      "repo": "https://github.com/spf13/cast",
+      "fix": "fa4ea64dd5187a42d6bf419b06bd4f7349ed4027",
+      "base": "b8a591b57a67356901b437bb0ddc12569b20160e",
+      "parent": "cb5df5f7f3cc70c3686e95064f90af9ca137ae93",
+      "test_paths": [
+        "number_internal_test.go",
+        "number_test.go"
+      ],
+      "source_paths": [
+        "cast.go",
+        "number.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 55,
+      "suite_seconds": 0.7
+    },
+    {
+      "id": "gjson-28d458b1",
+      "repo": "https://github.com/tidwall/gjson",
+      "fix": "28d458b14c40df6321bba23bcb39579d468f5e97",
+      "base": "df0bbe493503d8cbdf017cdd6cedd6102a8881d2",
+      "parent": "c2bc5a409a229e55cd1ba59b6cfd5fe1488d6f0f",
+      "test_paths": [
+        "gjson_test.go"
+      ],
+      "source_paths": [
+        "gjson.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 3,
+      "suite_seconds": 0.53
+    },
+    {
+      "id": "gjson-38071ea7",
+      "repo": "https://github.com/tidwall/gjson",
+      "fix": "38071ea7f28f2b06b726a18690d5d3a6d7fae496",
+      "base": "bb5d95d7e91466a1c0b3405e19e8062daa577b1f",
+      "parent": "ba95ef80b5015aee9fc8168691f21be20eae0e5c",
+      "test_paths": [
+        "gjson_test.go"
+      ],
+      "source_paths": [
+        "gjson.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 18,
+      "suite_seconds": 0.62
+    },
+    {
+      "id": "gjson-5ab551f3",
+      "repo": "https://github.com/tidwall/gjson",
+      "fix": "5ab551f3ac05551c469e5f5ab26154a49f69afcf",
+      "base": "6f96e4b22aa2efd27c8e5a4ae41937cbaabeee4a",
+      "parent": "28d458b14c40df6321bba23bcb39579d468f5e97",
+      "test_paths": [
+        "gjson_test.go"
+      ],
+      "source_paths": [
+        "gjson.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 14,
+      "suite_seconds": 0.53
+    },
+    {
+      "id": "gjson-e4fc67c9",
+      "repo": "https://github.com/tidwall/gjson",
+      "fix": "e4fc67c92aeebf2089fabc7872f010e340d105db",
+      "base": "a03ca3895d29d9f5a63d359af1b5cf44903d8ff2",
+      "parent": "f47e17d70abf2ff5abce883987ed52177cec0cc3",
+      "test_paths": [
+        "gjson_test.go"
+      ],
+      "source_paths": [
+        "gjson.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 36,
+      "suite_seconds": 0.56
+    },
+    {
+      "id": "go-multierror-0023bb0a",
+      "repo": "https://github.com/hashicorp/go-multierror",
+      "fix": "0023bb0ab1225a10509dca08627b42bed25d74a5",
+      "base": "8e6b8f6453cf4b566f428c42677460f454138c74",
+      "parent": "ab6846acb1cf402787cde041fcff5f01c0b8e362",
+      "test_paths": [
+        "multierror_test.go"
+      ],
+      "source_paths": [
+        "multierror.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 15,
+      "suite_seconds": 0.48
+    },
+    {
+      "id": "go-multierror-58e4f189",
+      "repo": "https://github.com/hashicorp/go-multierror",
+      "fix": "58e4f1897fb08fd76f5fd4e81e2c6c5dddb59899",
+      "base": "13f9c56f59ffb0c4cd071a43411b66f8b8c0ee15",
+      "parent": "ece20dc25a7a71cf2c162222fd1fc66b054b6f9d",
+      "test_paths": [
+        "multierror_test.go"
+      ],
+      "source_paths": [
+        "multierror.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 69,
+      "suite_seconds": 0.53
+    },
+    {
+      "id": "go-multierror-5e6cd52d",
+      "repo": "https://github.com/hashicorp/go-multierror",
+      "fix": "5e6cd52db1122dd65107db936a4ce8dd86db80d1",
+      "base": "6cb7e4ca2ced98acb1b3db4107aa01130d068b3a",
+      "parent": "bdca7bb83f603b80ef756bb953fe1dafa9cd00a2",
+      "test_paths": [
+        "group_test.go"
+      ],
+      "source_paths": [
+        "group.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 38,
+      "suite_seconds": 0.48
+    },
+    {
+      "id": "govalidator-7278f903",
+      "repo": "https://github.com/asaskevich/govalidator",
+      "fix": "7278f9036e2617b5c774000e57aa228168e9270d",
+      "base": "6cb236262b9fe53c92223ac8a2f2c617fc0e0c03",
+      "parent": "e11347878e2323a0777b40d33eeffd37a185e31b",
+      "test_paths": [
+        "validator_test.go"
+      ],
+      "source_paths": [
+        "validator.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 5,
+      "suite_seconds": 0.62
+    },
+    {
+      "id": "govalidator-831ffb32",
+      "repo": "https://github.com/asaskevich/govalidator",
+      "fix": "831ffb3254069a8ebe1bcf8257206804514c1ed2",
+      "base": "83f961ff4eb3a7db43689e8f444e05ea6afbcaaf",
+      "parent": "e11347878e2323a0777b40d33eeffd37a185e31b",
+      "test_paths": [
+        "validator_test.go"
+      ],
+      "source_paths": [
+        "patterns.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 4,
+      "suite_seconds": 0.67
+    },
+    {
+      "id": "govalidator-86801407",
+      "repo": "https://github.com/asaskevich/govalidator",
+      "fix": "868014078be7482ad816c83288b14171249913c9",
+      "base": "cd794afe5bacff0677330a048157272b25d96263",
+      "parent": "4d94f08d157160a2e7c27081cd36f919ce2f3cac",
+      "test_paths": [
+        "validator_test.go"
+      ],
+      "source_paths": [
+        "types.go",
+        "validator.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 24,
+      "suite_seconds": 2.5
+    },
+    {
+      "id": "govalidator-f8bf7fae",
+      "repo": "https://github.com/asaskevich/govalidator",
+      "fix": "f8bf7fae164c66afbf41fd88dc1c68c2c3f82b11",
+      "base": "cee4803ad87d1712c90d651fa4a41591db611bf9",
+      "parent": "e11347878e2323a0777b40d33eeffd37a185e31b",
+      "test_paths": [
+        "validator_test.go"
+      ],
+      "source_paths": [
+        "validator.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 5,
+      "suite_seconds": 0.67
+    },
+    {
+      "id": "mapstructure-63cde0df",
+      "repo": "https://github.com/mitchellh/mapstructure",
+      "fix": "63cde0dfe2481856bcfc2184477b26df770f19d7",
+      "base": "87c4f43026bfaff92774fe3c1bc94936a48a5556",
+      "parent": "bf980b35cac4dfd34e05254ee5aba086504c3f96",
+      "test_paths": [
+        "decode_hooks_test.go"
+      ],
+      "source_paths": [
+        "decode_hooks.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 6,
+      "suite_seconds": 0.52
+    },
+    {
+      "id": "mapstructure-7bbefaa2",
+      "repo": "https://github.com/mitchellh/mapstructure",
+      "fix": "7bbefaa2a042b74aa163cb995803735a14b2527c",
+      "base": "59c666e451ce47e6c241fca61499181d28a4fde1",
+      "parent": "b9b99d7d59762a5b2a43df840adc318b2fa229ee",
+      "test_paths": [
+        "mapstructure_test.go"
+      ],
+      "source_paths": [
+        "mapstructure.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 2,
+      "suite_seconds": 1.94
+    },
+    {
+      "id": "mapstructure-94c41ea7",
+      "repo": "https://github.com/mitchellh/mapstructure",
+      "fix": "94c41ea7124ac37cfb07e98bd4f0934b4429bd7e",
+      "base": "09be5a6d22ab886eaa2362df5e372f3085f99fa8",
+      "parent": "b9b99d7d59762a5b2a43df840adc318b2fa229ee",
+      "test_paths": [
+        "mapstructure_test.go"
+      ],
+      "source_paths": [
+        "mapstructure.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 27,
+      "suite_seconds": 0.48
+    },
+    {
+      "id": "mapstructure-b37a0d6b",
+      "repo": "https://github.com/mitchellh/mapstructure",
+      "fix": "b37a0d6b00fd83b3d29cb45893282593d8c99f38",
+      "base": "105eb3f1e8ee5700079676c4fda7983e2b97796f",
+      "parent": "b9b99d7d59762a5b2a43df840adc318b2fa229ee",
+      "test_paths": [
+        "mapstructure_test.go"
+      ],
+      "source_paths": [
+        "mapstructure.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 8,
+      "suite_seconds": 0.48
+    },
+    {
+      "id": "mux-10f71ea4",
+      "repo": "https://github.com/gorilla/mux",
+      "fix": "10f71ea482969adafbfc9dcbac1bd11691e23708",
+      "base": "031f07b4dac604ce435bc72d7d2cf4b4df068ce6",
+      "parent": "525206d7c2b250ca658700448b3bf23ec4707115",
+      "test_paths": [
+        "route_test.go"
+      ],
+      "source_paths": [
+        "mux.go",
+        "route.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 48,
+      "suite_seconds": 0.67
+    },
+    {
+      "id": "mux-374bd703",
+      "repo": "https://github.com/gorilla/mux",
+      "fix": "374bd703c9905868a6eb75292e72d136ea5b8d75",
+      "base": "1493e77ceb0b3f8e0d0e790b1ddbafa7b91418cf",
+      "parent": "976b536446a77de8de2d5559c78f612970fb5e37",
+      "test_paths": [
+        "route_test.go"
+      ],
+      "source_paths": [
+        "mux.go",
+        "regexp.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 10,
+      "suite_seconds": 0.64
+    },
+    {
+      "id": "mux-7cc5738c",
+      "repo": "https://github.com/gorilla/mux",
+      "fix": "7cc5738c66843ca81389cfa94ea80a7a7d0e349b",
+      "base": "88c0f0d8d55bb547b0ff07bfac5101d625620ff2",
+      "parent": "de7178dc9dffadc3cf56bece3962737e8b0710b8",
+      "test_paths": [
+        "middleware_test.go"
+      ],
+      "source_paths": [
+        "middleware.go",
+        "route.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 32,
+      "suite_seconds": 0.73
+    },
+    {
+      "id": "mux-de7178dc",
+      "repo": "https://github.com/gorilla/mux",
+      "fix": "de7178dc9dffadc3cf56bece3962737e8b0710b8",
+      "base": "60e0b4cb84bba18c1640213accdb205f0e2e681f",
+      "parent": "cfec64dd9f7b38263f7ac56023c96299587d529a",
+      "test_paths": [
+        "regexp_test.go"
+      ],
+      "source_paths": [
+        "regexp.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 67,
+      "suite_seconds": 0.66
+    },
+    {
+      "id": "sjson-0bc94ab8",
+      "repo": "https://github.com/tidwall/sjson",
+      "fix": "0bc94ab89f8a5d8cea208fb1146f65aa92064119",
+      "base": "07e45604e93cfd755d1482e0145ef676759529aa",
+      "parent": "a2a89c2f1eaac50bf8f57ffffc860735d9f5d55a",
+      "test_paths": [
+        "sjson_test.go"
+      ],
+      "source_paths": [
+        "sjson.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 118,
+      "suite_seconds": 0.55
+    },
+    {
+      "id": "sjson-11cb24d8",
+      "repo": "https://github.com/tidwall/sjson",
+      "fix": "11cb24d8421de3e1bb5c5efb066a03037150568d",
+      "base": "73bae5670b5932ea27b715e88acced0a55f05a0c",
+      "parent": "fcc1b998195dce17df1e8ffb655755fb20b80fc2",
+      "test_paths": [
+        "sjson_test.go"
+      ],
+      "source_paths": [
+        "sjson.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 8,
+      "suite_seconds": 0.53
+    },
+    {
+      "id": "uuid-2d3c2a9c",
+      "repo": "https://github.com/google/uuid",
+      "fix": "2d3c2a9cc518326daf99a383f07c4d3c44317e4d",
+      "base": "f92ed6a60671c4c25944fe1868dabd064c3a0cac",
+      "parent": "0e97ed3b537927cb4afea366bc4cc36f6eb37e75",
+      "test_paths": [
+        "time_test.go",
+        "version6_test.go"
+      ],
+      "source_paths": [
+        "time.go",
+        "version6.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 42,
+      "suite_seconds": 0.56
+    },
+    {
+      "id": "uuid-9ee7366e",
+      "repo": "https://github.com/google/uuid",
+      "fix": "9ee7366e66c9ad96bab89139418a713dc584ae29",
+      "base": "4012bafb254f3292e1ec88f59901fbb7b36523fd",
+      "parent": "b35aa6a595277504b1ec94c520d4091ec050b9d5",
+      "test_paths": [
+        "uuid_test.go"
+      ],
+      "source_paths": [
+        "uuid.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 53,
+      "suite_seconds": 0.56
+    },
+    {
+      "id": "uuid-a2b2b323",
+      "repo": "https://github.com/google/uuid",
+      "fix": "a2b2b32373ff0b1a312b7fdf6d38a977099698a6",
+      "base": "e0b6e8734424ed207bd83115eb9d3ecd06e8433b",
+      "parent": "c58770eb495f55fe2ced6284f93c5158a62e53e3",
+      "test_paths": [
+        "uuid_test.go"
+      ],
+      "source_paths": [
+        "version7.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 39,
+      "suite_seconds": 0.55
+    },
+    {
+      "id": "uuid-e8d82d30",
+      "repo": "https://github.com/google/uuid",
+      "fix": "e8d82d30a3eb641530570da83295395651911778",
+      "base": "5f066a0e202e532d9d35fe84d27641e37bcda7b0",
+      "parent": "53dda83ebe99c23d0e66c2472abdbf178097c3b8",
+      "test_paths": [
+        "uuid_test.go"
+      ],
+      "source_paths": [
+        "util.go"
+      ],
+      "command": "go test ./...",
+      "fix_source_lines": 6,
+      "suite_seconds": 0.58
+    }
+  ]
+}
