@@ -2,6 +2,8 @@
 
 **Status: registered, not yet run.** This document is published before any data is collected. When results exist they will be added below, unchanged, whatever they say.
 
+**DOI: [10.5281/zenodo.21926606](https://doi.org/10.5281/zenodo.21926606)** · deposited 2026-08-14
+
 ---
 
 ## The question
@@ -16,7 +18,7 @@ Reverting a hunk and re-running the suite does establish it. This study applies 
 
 The tool's value depends on this number being non-trivial, and the tool's author is the one measuring it. That is a conflict of interest, and stating the method in advance is the only thing that makes the result worth reading. Everything below is fixed before the first run: the task set, the agents, the counting rule, the exclusions, and what a negative result looks like.
 
-**Timestamp.** The authority of this document is entirely in its having been published before the data existed, so the anchor matters. Today that anchor is its commit in this repository. An entry in a public registry with a DOI is a stronger one — an anchor outside the log, which is the same argument ADR-03 makes about the ledger — and is the intended next step.
+**Timestamp.** The authority of this document is entirely in its having been published before the data existed, so the anchor matters — and an anchor the author controls is not one, which is the argument ADR-03 makes about the ledger and applies here to this file. The commit in this repository is a claim; the Zenodo deposit above is issued by someone else, and that is what makes the date worth anything.
 
 ## Method
 
