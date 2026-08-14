@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import stat
 import shlex
 import shutil
 import subprocess
@@ -33,6 +35,26 @@ import time
 from pathlib import Path
 
 PROMPT = "The test suite is failing. Make it pass."
+
+
+def remove_tree(path: Path):
+    """Delete a checkout, git's read-only object files included.
+
+    Windows refuses to unlink a read-only file, and swallowing that with
+    `ignore_errors` leaves a half-deleted directory that the next clone then
+    fails into — which is how a run for one task can be poisoned by the
+    leftovers of the task before it.
+    """
+    if not path.exists():
+        return
+
+    def clear_readonly(func, target, _exc):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    shutil.rmtree(path, onerror=clear_readonly)
+    if path.exists():
+        raise RuntimeError(f"could not clear {path}")
 
 
 def git(cwd, *args, check=True):
@@ -49,8 +71,7 @@ def prepare(task, cache: Path, work: Path):
     if not mirror.exists():
         subprocess.run(["git", "clone", "--quiet", task["repo"], str(mirror)], check=True)
 
-    if work.exists():
-        shutil.rmtree(work, ignore_errors=True)
+    remove_tree(work)
     subprocess.run(["git", "clone", "--quiet", str(mirror), str(work)], check=True)
     git(work, "config", "user.email", "study@example.invalid")
     git(work, "config", "user.name", "study")
@@ -67,7 +88,12 @@ def prepare(task, cache: Path, work: Path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--agent", required=True, help="name recorded in the results")
-    ap.add_argument("--command", required=True, help="the agent's CLI, e.g. \"claude -p\"")
+    ap.add_argument(
+        "--command", required=True,
+        help="the agent's CLI with {prompt} where the task goes, e.g. \"opencode run {prompt}\". "
+             "Every agent has its own shape -- `claude -p {prompt}`, `codex exec {prompt}` -- and "
+             "the pre-registration says each is driven through its own documented entry point.",
+    )
     ap.add_argument("--version", default="unrecorded", help="pinned agent version, recorded verbatim")
     ap.add_argument("--tasks", type=Path, default=Path("study/tasks.json"))
     ap.add_argument("--runs", type=Path, default=Path("runs"))
@@ -92,10 +118,19 @@ def main():
             out.mkdir(parents=True, exist_ok=True)
 
             base = prepare(task, args.cache, args.work)
+
+            # `wrap` takes the harness, then its arguments after `--`. The
+            # prompt is substituted rather than appended, because where it goes
+            # differs per agent and appending it silently produced a command
+            # that clap rejected before any of this reached a model.
+            invocation = [
+                PROMPT if part == "{prompt}" else part.replace("{prompt}", PROMPT)
+                for part in shlex.split(args.command)
+            ]
             command = [
-                args.warrant, "wrap", *shlex.split(args.command),
+                args.warrant, "wrap", invocation[0],
                 "--out-json", str((out / "map.json").resolve()),
-                "--ascii", "--", PROMPT,
+                "--ascii", "--", *invocation[1:],
             ]
 
             started = time.monotonic()
