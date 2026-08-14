@@ -108,6 +108,8 @@ Any departure from the above will be recorded here with its reason and its date,
 
 **2026-08-14 — the instrument is validated before use.** Two stand-in agents, no model involved, must produce an undefined rate and 100% respectively. Added on running them: they found two defects in the runner, and either would have corrupted a paid run.
 
+**2026-08-14 — a run that hits the wall is excluded, and the wall is enforced.** The first pilot against a real agent produced two runs of 1591 and 2144 seconds against a 900-second limit, because killing the agent left the compilers and test runners it had spawned holding the output pipes. The runner now kills the process tree and closes the agent's standard input; an agent that stops to ask a question gets end-of-file instead of a terminal nobody is watching. Runs that hit the limit are recorded as not terminated and excluded, which the counting rule already provided for.
+
 ---
 
 ## Results

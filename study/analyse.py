@@ -47,6 +47,7 @@ SHAPES = {
 
 @dataclass
 class Agent:
+    #: A harness and a model together. Neither identifies a system on its own.
     name: str
     versions: set[str] = field(default_factory=set)
     green: int = 0
@@ -69,7 +70,8 @@ def collect(runs: Path) -> dict[str, Agent]:
     agents: dict[str, Agent] = {}
     for run_json in sorted(runs.glob("*/*/*/run.json")):
         meta = json.loads(run_json.read_text(encoding="utf-8"))
-        agent = agents.setdefault(meta["agent"], Agent(meta["agent"]))
+        row = f'{meta["agent"]} / {meta.get("model", "unrecorded")}'
+        agent = agents.setdefault(row, Agent(row))
         agent.versions.add(meta.get("agent_version", "unrecorded"))
         agent.tasks_seen.add(meta["task"])
 

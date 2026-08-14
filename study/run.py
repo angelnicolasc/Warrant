@@ -30,6 +30,7 @@ import os
 import stat
 import shlex
 import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -55,6 +56,45 @@ def remove_tree(path: Path):
     shutil.rmtree(path, onerror=clear_readonly)
     if path.exists():
         raise RuntimeError(f"could not clear {path}")
+
+
+def kill_tree(pid):
+    """Kill the agent and everything it started.
+
+    Agents spawn compilers, test runners and language servers. Killing only
+    the process we launched leaves those holding the output pipes, and the
+    wait that follows blocks on them — which is how a 900-second timeout came
+    to take 2144 seconds.
+    """
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
+    else:
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
+
+
+def run_agent(command, cwd, timeout):
+    """Run the agent to completion or to the wall, and be sure it is gone.
+
+    stdin is closed rather than inherited. An agent that decides to ask a
+    question would otherwise wait forever on a terminal nobody is watching,
+    and an unattended study would stop at the first one that did.
+    """
+    proc = subprocess.Popen(
+        command, cwd=cwd, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, errors="replace",
+        **({} if os.name == "nt" else {"start_new_session": True}),
+    )
+    try:
+        output = proc.communicate(timeout=timeout)[0]
+        return True, proc.returncode, output
+    except subprocess.TimeoutExpired:
+        kill_tree(proc.pid)
+        try:
+            output = proc.communicate(timeout=60)[0]
+        except subprocess.TimeoutExpired:
+            output = "(the agent did not exit after being killed)"
+        return False, None, output
 
 
 def git(cwd, *args, check=True):
@@ -95,6 +135,12 @@ def main():
              "the pre-registration says each is driven through its own documented entry point.",
     )
     ap.add_argument("--version", default="unrecorded", help="pinned agent version, recorded verbatim")
+    ap.add_argument(
+        "--model", default="unrecorded",
+        help="the model behind the harness, e.g. deepseek-v4-pro. A row in the results is a "
+             "harness AND a model: the same harness driving two models is two systems. Recorded "
+             "as a field rather than folded into --agent, which would put a slash in a path.",
+    )
     ap.add_argument("--tasks", type=Path, default=Path("study/tasks.json"))
     ap.add_argument("--runs", type=Path, default=Path("runs"))
     ap.add_argument("--cache", type=Path, default=Path(".harvest"))
@@ -107,7 +153,8 @@ def main():
 
     document = json.loads(args.tasks.read_text(encoding="utf-8"))
     tasks = [t for t in document["tasks"] if not args.only or t["id"] in args.only]
-    print(f"{len(tasks)} tasks x {args.repetitions} repetitions as {args.agent}")
+    print(f"{len(tasks)} tasks x {args.repetitions} repetitions "
+          f"as {args.agent} / {args.model}")
 
     for task in tasks:
         for rep in range(1, args.repetitions + 1):
@@ -134,15 +181,9 @@ def main():
             ]
 
             started = time.monotonic()
-            try:
-                result = subprocess.run(command, cwd=args.work, timeout=args.timeout,
-                                        capture_output=True, text=True, errors="replace")
-                terminated, code = True, result.returncode
-                (out / "agent.log").write_text(result.stdout + result.stderr,
-                                               encoding="utf-8", errors="replace")
-            except subprocess.TimeoutExpired:
-                terminated, code = False, None
+            terminated, code, output = run_agent(command, args.work, args.timeout)
             elapsed = time.monotonic() - started
+            (out / "agent.log").write_text(output or "", encoding="utf-8", errors="replace")
 
             # What the agent left behind, for shape classification. Taken from
             # the repository rather than from the map, because the map records
@@ -152,6 +193,7 @@ def main():
             (out / "run.json").write_text(json.dumps({
                 "agent": args.agent,
                 "agent_version": args.version,
+                "model": args.model,
                 "task": task["id"],
                 "repetition": rep,
                 "terminated": terminated,
