@@ -72,29 +72,37 @@ def kill_tree(pid):
         os.killpg(os.getpgid(pid), signal.SIGKILL)
 
 
-def run_agent(command, cwd, timeout):
+def run_agent(command, cwd, timeout, log_path: Path):
     """Run the agent to completion or to the wall, and be sure it is gone.
+
+    Output goes to a file, not a pipe. That is not a style choice: driven
+    with its output on a pipe, an agent here reasoned for six minutes, spent
+    the tokens, reported success and changed nothing — every time. The same
+    command with its output on a file solved the task. Agents spawn servers
+    and helpers that inherit the handle, and something in that inheritance
+    does not survive a pipe.
 
     stdin is closed rather than inherited. An agent that decides to ask a
     question would otherwise wait forever on a terminal nobody is watching,
     and an unattended study would stop at the first one that did.
     """
-    proc = subprocess.Popen(
-        command, cwd=cwd, stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, errors="replace",
-        **({} if os.name == "nt" else {"start_new_session": True}),
-    )
-    try:
-        output = proc.communicate(timeout=timeout)[0]
-        return True, proc.returncode, output
-    except subprocess.TimeoutExpired:
-        kill_tree(proc.pid)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "w", encoding="utf-8", errors="replace") as log:
+        proc = subprocess.Popen(
+            command, cwd=cwd, stdin=subprocess.DEVNULL,
+            stdout=log, stderr=subprocess.STDOUT,
+            **({} if os.name == "nt" else {"start_new_session": True}),
+        )
         try:
-            output = proc.communicate(timeout=60)[0]
+            proc.wait(timeout=timeout)
+            return True, proc.returncode
         except subprocess.TimeoutExpired:
-            output = "(the agent did not exit after being killed)"
-        return False, None, output
+            kill_tree(proc.pid)
+            try:
+                proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                pass
+            return False, None
 
 
 def git(cwd, *args, check=True):
@@ -190,9 +198,8 @@ def main():
             ]
 
             started = time.monotonic()
-            terminated, code, output = run_agent(command, work, args.timeout)
+            terminated, code = run_agent(command, work, args.timeout, out / "agent.log")
             elapsed = time.monotonic() - started
-            (out / "agent.log").write_text(output or "", encoding="utf-8", errors="replace")
 
             # What the agent left behind, for shape classification. Taken from
             # the repository rather than from the map, because the map records
