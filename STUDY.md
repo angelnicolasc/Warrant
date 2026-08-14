@@ -2,7 +2,7 @@
 
 **Status: registered, not yet run.** This document is published before any data is collected. When results exist they will be added below, unchanged, whatever they say.
 
-**DOI: [10.5281/zenodo.21926606](https://doi.org/10.5281/zenodo.21926606)** · deposited 2026-08-14
+**DOI: [10.5281/zenodo.21926606](https://doi.org/10.5281/zenodo.21926606)** · deposited 2026-08-14 · [all versions](https://doi.org/10.5281/zenodo.21926605)
 
 ---
 
@@ -18,7 +18,20 @@ Reverting a hunk and re-running the suite does establish it. This study applies 
 
 The tool's value depends on this number being non-trivial, and the tool's author is the one measuring it. That is a conflict of interest, and stating the method in advance is the only thing that makes the result worth reading. Everything below is fixed before the first run: the task set, the agents, the counting rule, the exclusions, and what a negative result looks like.
 
-**Timestamp.** The authority of this document is entirely in its having been published before the data existed, so the anchor matters — and an anchor the author controls is not one, which is the argument ADR-03 makes about the ledger and applies here to this file. The commit in this repository is a claim; the Zenodo deposit above is issued by someone else, and that is what makes the date worth anything.
+**Timestamp, and how to check it.** The authority of this document is entirely in its having been published before the data existed, so the anchor matters — and an anchor the author controls is not one, which is the argument ADR-03 makes about the ledger and applies to this file exactly as much. The commit in this repository is a claim. The Zenodo deposit is issued by someone else, and it is dated.
+
+What binds the two is the fingerprint. The deposited document names the task set by hash; the set itself lives here. So the set cannot have changed since the deposit, and you do not have to take that on trust:
+
+```bash
+python - <<'EOF'
+import json, hashlib
+t = json.load(open("study/tasks.json"))["tasks"]
+k = ("id", "repo", "fix", "parent", "test_paths", "command")
+i = json.dumps([{f: x[f] for f in k} for x in t], sort_keys=True)
+print("blake2b:" + hashlib.blake2b(i.encode(), digest_size=16).hexdigest())
+EOF
+# blake2b:ee02cf85bdf681de63d60ed0e83429b2 — the value in the deposit
+```
 
 ## Method
 

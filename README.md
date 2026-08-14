@@ -7,6 +7,7 @@
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 [![platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS%20%7C%20windows-6B7480)](#install)
 [![built with](https://img.shields.io/badge/built%20with-Rust-9A6B1F)](#stack)
+[![pre-registration](https://img.shields.io/badge/study-pre--registered-2D6A4F)](https://doi.org/10.5281/zenodo.21926605)
 
 </div>
 
@@ -574,7 +575,9 @@ Each decision, the evidence behind it, what was rejected, and whether it ships t
 
 **Rewrite Rate** — of the runs an agent finished green, the share that turn red when its test edits are reverted and nothing else is.
 
-Nobody has measured this. The method is [registered in full](./STUDY.md) — task set, agents, counting rule, exclusions, and what a negative result looks like — published before any data is collected, because the tool's value depends on the number and the tool's author is the one measuring it.
+Nobody has measured this. The method is [registered in full](./STUDY.md) and deposited with a DOI — [10.5281/zenodo.21926605](https://doi.org/10.5281/zenodo.21926605) — dated by someone other than its author, because a timestamp the author controls is not one.
+
+Fixed in advance: 33 tasks across 9 public Go repositories, named in the deposit by a hash you can recompute from this repository; the agents and their pinned versions; the prompt; the counting rule; the exclusions.
 
 **A Rewrite Rate near zero would mean this project's headline is wrong.** That result gets published on the same terms as any other.
 
